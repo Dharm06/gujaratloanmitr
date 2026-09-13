@@ -18,6 +18,11 @@ function calcSchedule(p, r, n) {
 }
 const fmt = n => "₹" + Math.round(n).toLocaleString("en-IN");
 const fmtL = n => n >= 10000000 ? `₹${(n / 10000000).toFixed(0)}Cr` : n >= 100000 ? `₹${(n / 100000).toFixed(0)}L` : `₹${(n / 1000).toFixed(0)}K`;
+const formatRateRange = (rate, maxRate) => {
+  const start = Number(rate) || 0;
+  const end = Number(maxRate) || start;
+  return start === end ? `${start}%` : `${start}% – ${end}%`;
+};
 
 // ─── BANK LOGOS ───────────────────────────────────────────────────────────────
 const BASE = "https://raw.githubusercontent.com/praveenpuglia/indian-banks/main/assets/logos";
@@ -94,7 +99,7 @@ function DesktopChrome({ active, setPage, isGu, setShowSearch }) {
   );
 }
 
-function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, dsaProfiles, setDsaProfiles }) {
+function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, dsaProfiles, setDsaProfiles, nbfcs, setNbfcs }) {
   const [authenticated, setAuthenticated] = useState(() => Boolean(sessionStorage.getItem("adminToken")));
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -105,6 +110,8 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
   const [schemeStatus, setSchemeStatus] = useState("");
   const [dsaId, setDsaId] = useState(dsaProfiles[0]?.id || "");
   const [dsaStatus, setDsaStatus] = useState("");
+  const [nbfcStatus, setNbfcStatus] = useState("");
+  const [newNbfc, setNewNbfc] = useState({ name: "", short: "", loanType: "home", rate: "10", maxRate: "12", fee: "2", approval: "70", maxLoan: "1000000", tenure: "1-5 yrs", city: "" });
   const isGu = lang === "gu";
   const banks = bankData[loanType] || [];
   const selected = banks.find(bank => bank.id === Number(bankId)) || banks[0];
@@ -145,6 +152,28 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
         }));
       })
       .catch(error => console.warn("Saved rates unavailable; showing default rates.", error));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/nbfcs")
+      .then(response => {
+        if (!response.ok) throw new Error(`NBFC API returned ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (Array.isArray(data.nbfcs)) {
+          setNbfcs(data.nbfcs);
+          setBankData(current => ({
+            ...current,
+            ...Object.fromEntries(Object.entries(LOAN_META).map(([type]) => {
+              const existing = current[type] || [];
+              const additions = data.nbfcs.filter(nbfc => nbfc.loanType === type && !existing.some(bank => bank.id === nbfc.id));
+              return [type, [...existing, ...additions]];
+            })),
+          }));
+        }
+      })
+      .catch(error => console.warn("Saved NBFCs unavailable; showing the built-in lenders.", error));
   }, []);
 
   useEffect(() => {
@@ -284,6 +313,39 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
     setDsaId(remaining[0]?.id || "");
     setDsaStatus("DSA profile removed");
   };
+  const saveNbfc = async (event) => {
+    event.preventDefault();
+    setNbfcStatus("Saving...");
+    const response = await fetch("/api/nbfcs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("adminToken")}` },
+      body: JSON.stringify({ nbfc: newNbfc }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setNbfcStatus(result.error || "Unable to save NBFC");
+      return;
+    }
+    const result = await response.json();
+    const saved = result.nbfc;
+    setNbfcs(current => [...current.filter(item => item.id !== saved.id), saved]);
+    setBankData(current => ({ ...current, [saved.loanType]: [...(current[saved.loanType] || []).filter(bank => bank.id !== saved.id), saved] }));
+    setNewNbfc(current => ({ ...current, name: "", short: "" }));
+    setNbfcStatus("NBFC added and published");
+  };
+  const removeNbfc = async (nbfc) => {
+    if (!window.confirm(`Remove ${nbfc.name}?`)) return;
+    setNbfcStatus("Removing...");
+    const response = await fetch(`/api/nbfcs?id=${encodeURIComponent(nbfc.id)}`, { method: "DELETE", headers: { Authorization: `Bearer ${sessionStorage.getItem("adminToken")}` } });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setNbfcStatus(result.error || "Unable to remove NBFC");
+      return;
+    }
+    setNbfcs(current => current.filter(item => item.id !== nbfc.id));
+    setBankData(current => ({ ...current, [nbfc.loanType]: (current[nbfc.loanType] || []).filter(bank => bank.id !== nbfc.id) }));
+    setNbfcStatus("NBFC removed");
+  };
 
   if (!authenticated) return (
     <div className="loan-page admin-login-page" style={S.page}>
@@ -382,6 +444,20 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
           <button onClick={saveDsas} style={{ width: "100%", padding: 13, marginTop: 14, ...S.orange, fontSize: 13 }}>Publish DSA profiles</button>
           {selectedDsa && <button onClick={removeDsa} style={{ width: "100%", padding: 12, marginTop: 8, background: "#fff", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 12, color: "#B42318", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Remove selected DSA</button>}
           {dsaStatus && <p style={{ color: dsaStatus === "Saving..." ? "#B8860B" : "#16803c", fontSize: 11, textAlign: "center", margin: "10px 0 0" }}>{dsaStatus}</p>}
+        </div>
+        <div style={{ ...S.card, marginTop: 22 }}>
+          <h3 style={{ color: "#2B2115", fontSize: 15, margin: "0 0 5px" }}>Add NBFC lender</h3>
+          <p style={{ color: "rgba(43,33,21,0.55)", fontSize: 11, lineHeight: 1.5, margin: "0 0 14px" }}>Add a lender to one loan category. The lender will appear in comparison and search after publishing.</p>
+          <form onSubmit={saveNbfc} style={{ display: "grid", gap: 10 }}>
+            {[
+              ["name", "NBFC name"], ["short", "Short name"], ["city", "City / service area"], ["tenure", "Tenure"],
+            ].map(([field, label]) => <label key={field} style={{ color: "rgba(43,33,21,0.55)", fontSize: 10, fontWeight: 700 }}>{label}<input required={field === "name"} value={newNbfc[field]} onChange={event => setNewNbfc(current => ({ ...current, [field]: event.target.value }))} style={{ display: "block", width: "100%", marginTop: 5, padding: 10, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 9 }} /></label>)}
+            <label style={{ color: "rgba(43,33,21,0.55)", fontSize: 10, fontWeight: 700 }}>Loan category<select value={newNbfc.loanType} onChange={event => setNewNbfc(current => ({ ...current, loanType: event.target.value }))} style={{ display: "block", width: "100%", marginTop: 5, padding: 10, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 9, background: "#fff" }}>{Object.entries(LOAN_META).map(([key, value]) => <option key={key} value={key}>{value.label}</option>)}</select></label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>{[["rate", "Starting rate %"], ["maxRate", "Maximum rate %"], ["fee", "Fee %"], ["approval", "Approval %"], ["maxLoan", "Max loan ₹"]].map(([field, label]) => <label key={field} style={{ color: "rgba(43,33,21,0.55)", fontSize: 9, fontWeight: 700 }}>{label}<input type="number" min="0" step="0.01" value={newNbfc[field]} onChange={event => setNewNbfc(current => ({ ...current, [field]: event.target.value }))} style={{ display: "block", width: "100%", marginTop: 5, padding: 9, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 9 }} /></label>)}</div>
+            <button type="submit" style={{ ...S.orange, padding: 13, fontSize: 13 }}>Add NBFC for everyone</button>
+          </form>
+          {nbfcs.length > 0 && <div style={{ display: "grid", gap: 7, marginTop: 14 }}>{nbfcs.map(nbfc => <div key={nbfc.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#fff", borderRadius: 9, border: "1px solid rgba(184,134,11,0.12)" }}><span style={{ flex: 1, color: "#2B2115", fontSize: 11, fontWeight: 700 }}>{nbfc.name}<small style={{ display: "block", color: "rgba(43,33,21,0.45)", fontWeight: 400 }}>{LOAN_META[nbfc.loanType]?.label}</small></span><button type="button" onClick={() => removeNbfc(nbfc)} style={{ border: "1px solid rgba(220,38,38,0.25)", background: "#fff", color: "#B42318", borderRadius: 7, padding: "5px 8px", fontSize: 10, cursor: "pointer" }}>Remove</button></div>)}</div>}
+          {nbfcStatus && <p style={{ color: nbfcStatus === "Saving..." || nbfcStatus === "Removing..." ? "#B8860B" : "#16803c", fontSize: 11, textAlign: "center", margin: "10px 0 0" }}>{nbfcStatus}</p>}
         </div>
       </div>
     </div>
@@ -1073,7 +1149,7 @@ function ComparePage({ lang, setLang, initType, setPage, setDetailBank, bankData
                     <BankLogo slug={bank.slug} name={bank.name} size={28} />
                     <strong style={{ color: "#2B2115", fontSize: 11, lineHeight: 1.2 }}>{bank.name}</strong>
                   </div>
-                  {[["Rate", `${bank.rate}%`], ["Fee", bank.fee === 0 ? "Zero" : `${bank.fee}%`], ["Approval", `${bank.approval}%`], ["Max loan", fmtL(bank.maxLoan)]].map(([label, value]) => (
+                  {[["Rate", formatRateRange(bank.rate, bank.maxRate)], ["Fee", bank.fee === 0 ? "Zero" : `${bank.fee}%`], ["Approval", `${bank.approval}%`], ["Max loan", fmtL(bank.maxLoan)]].map(([label, value]) => (
                     <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 6, padding: "5px 0", borderTop: "1px solid rgba(184,134,11,0.1)" }}>
                       <span style={{ color: "rgba(43,33,21,0.45)", fontSize: 9 }}>{label}</span>
                       <span style={{ color: "#2B2115", fontSize: 10, fontWeight: 800 }}>{value}</span>
@@ -1108,8 +1184,8 @@ function ComparePage({ lang, setLang, initType, setPage, setDetailBank, bankData
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                 <div style={{ background: "rgba(184,134,11,0.05)", borderRadius: 10, padding: "10px 6px", textAlign: "center" }}>
                   <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 8, margin: "0 0 3px", fontWeight: 600 }}>{isGu ? "." : "Rate"}</p>
-                  <p style={{ color: "#B8860B", fontSize: 17, fontWeight: 800, margin: 0 }}>{bank.rate}%</p>
-                  <p style={{ color: "rgba(43,33,21,0.3)", fontSize: 8, margin: 0 }}>{isGu ? "." : "onwards"}</p>
+                  <p style={{ color: "#B8860B", fontSize: 17, fontWeight: 800, margin: 0 }}>{formatRateRange(bank.rate, bank.maxRate)}</p>
+                  <p style={{ color: "rgba(43,33,21,0.3)", fontSize: 8, margin: 0 }}>{isGu ? "." : "interest range"}</p>
                 </div>
                 <div style={{ background: "rgba(59,130,246,0.06)", borderRadius: 10, padding: "10px 6px", textAlign: "center" }}>
                   <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 8, margin: "0 0 3px", fontWeight: 600 }}>{isGu ? "." : "Fee"}</p>
@@ -1127,7 +1203,7 @@ function ComparePage({ lang, setLang, initType, setPage, setDetailBank, bankData
                   <div style={{ borderTop: "1px solid rgba(184,134,11,0.15)", paddingTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
                     <div><p style={{ color: "rgba(43,33,21,0.4)", fontSize: 9, margin: "0 0 2px" }}>{isGu ? "." : "Max Loan"}</p><p style={{ color: "#2B2115", fontSize: 13, fontWeight: 700, margin: 0 }}>{fmtL(bank.maxLoan)}</p></div>
                     <div><p style={{ color: "rgba(43,33,21,0.4)", fontSize: 9, margin: "0 0 2px" }}>{isGu ? "." : "Tenure"}</p><p style={{ color: "#2B2115", fontSize: 13, fontWeight: 700, margin: 0 }}>{bank.tenure}</p></div>
-                    <div><p style={{ color: "rgba(43,33,21,0.4)", fontSize: 9, margin: "0 0 2px" }}>{isGu ? "." : "Rate Range"}</p><p style={{ color: "#2B2115", fontSize: 13, fontWeight: 700, margin: 0 }}>{bank.rate}% – {bank.maxRate}%</p></div>
+                    <div><p style={{ color: "rgba(43,33,21,0.4)", fontSize: 9, margin: "0 0 2px" }}>{isGu ? "." : "Rate Range"}</p><p style={{ color: "#2B2115", fontSize: 13, fontWeight: 700, margin: 0 }}>{formatRateRange(bank.rate, bank.maxRate)}</p></div>
                   </div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <button onClick={e => { e.stopPropagation(); setDetailBank({ ...bank, loanType: activeType }); setPage("detail"); }} style={{ flex: 1, padding: "12px", ...S.orange, fontSize: 13 }}>
@@ -1229,7 +1305,7 @@ function DetailPage({ bank, lang, setPage }) {
           </div>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {[{ l: isGu ? "." : "Rate", v: `${bank?.rate}%`, s: isGu ? "." : "onwards", c: "#B8860B" }, { l: isGu ? "." : "Fee", v: bank?.fee === 0 ? "Zero" : `${bank?.fee}%`, s: isGu ? "." : "of loan", c: "#3B82F6" }, { l: isGu ? "." : "Approval", v: `${bank?.approval}%`, s: "RBI ✓", c: "#0F8F5E" }, { l: isGu ? "." : "Max Loan", v: fmtL(bank?.maxLoan || 0), s: isGu ? "." : "upto", c: "#8B5CF6" }].map((item, i) => (
+          {[{ l: isGu ? "." : "Rate Range", v: formatRateRange(bank?.rate, bank?.maxRate), s: isGu ? "." : "indicative", c: "#B8860B" }, { l: isGu ? "." : "Fee", v: bank?.fee === 0 ? "Zero" : `${bank?.fee}%`, s: isGu ? "." : "of loan", c: "#3B82F6" }, { l: isGu ? "." : "Approval", v: `${bank?.approval}%`, s: "RBI ✓", c: "#0F8F5E" }, { l: isGu ? "." : "Max Loan", v: fmtL(bank?.maxLoan || 0), s: isGu ? "." : "upto", c: "#8B5CF6" }].map((item, i) => (
             <div key={i} style={{ background: "#FFFFFF", borderRadius: 12, padding: "10px", border: "1px solid rgba(184,134,11,0.1)" }}>
               <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 9, margin: "0 0 3px", fontWeight: 600 }}>{item.l}</p>
               <p style={{ color: item.c, fontSize: 18, fontWeight: 800, margin: "0 0 2px" }}>{item.v}</p>
@@ -1864,11 +1940,12 @@ export default function App() {
   const [bankData, setBankData] = useState(BANK_DATA);
   const [schemes, setSchemes] = useState(GOVT_SCHEMES);
   const [dsaProfiles, setDsaProfiles] = useState([]);
+  const [nbfcs, setNbfcs] = useState([]);
   const [hasSavedRates, setHasSavedRates] = useState(false);
 
   const tickerItems = useMemo(() => {
     const rateLines = Object.entries(bankData).flatMap(([loanType, banks]) => 
-      banks.slice(0, 2).map(bank => `${LOAN_META[loanType]?.label ?? loanType}: ${bank.name} ${bank.rate.toFixed(2)}%`)
+      banks.slice(0, 2).map(bank => `${LOAN_META[loanType]?.label ?? loanType}: ${bank.name} ${formatRateRange(bank.rate, bank.maxRate)}`)
     );
     const newsLines = Array.isArray(news) ? news.slice(0, 3).map(item => item.title || item.tag || "Latest update") : [];
     return rateLines.length > 0 ? rateLines : newsLines.length > 0 ? newsLines : ["Latest finance updates from Gujarat"]; 
@@ -1921,6 +1998,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    fetch("/api/nbfcs")
+      .then(response => {
+        if (!response.ok) throw new Error(`NBFC API returned ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (!Array.isArray(data.nbfcs)) return;
+        setNbfcs(data.nbfcs);
+        setBankData(current => ({
+          ...current,
+          ...Object.fromEntries(Object.entries(LOAN_META).map(([type]) => {
+            const existing = current[type] || [];
+            const additions = data.nbfcs.filter(nbfc => nbfc.loanType === type && !existing.some(bank => bank.id === nbfc.id));
+            return [type, [...existing, ...additions]];
+          })),
+        }));
+      })
+      .catch(error => console.warn("NBFC directory unavailable; showing built-in lenders.", error));
+  }, []);
+
+  useEffect(() => {
     fetch("/api/dsas")
       .then(response => {
         if (!response.ok) throw new Error(`DSA API returned ${response.status}`);
@@ -1939,7 +2037,7 @@ export default function App() {
   const isGu = lang === "gu";
 
   if (window.location.pathname === "/admin") {
-    return <AdminPage lang={lang} setLang={setLang} bankData={bankData} setBankData={setBankData} schemes={schemes} setSchemes={setSchemes} dsaProfiles={dsaProfiles} setDsaProfiles={setDsaProfiles} />;
+    return <AdminPage lang={lang} setLang={setLang} bankData={bankData} setBankData={setBankData} schemes={schemes} setSchemes={setSchemes} dsaProfiles={dsaProfiles} setDsaProfiles={setDsaProfiles} nbfcs={nbfcs} setNbfcs={setNbfcs} />;
   }
 
   return (

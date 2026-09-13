@@ -25,3 +25,11 @@ create table if not exists public.dsa_profiles (
 );
 
 alter table public.dsa_profiles enable row level security;
+
+create table if not exists public.custom_nbfcs (
+  id text primary key,
+  payload jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.custom_nbfcs enable row level security;

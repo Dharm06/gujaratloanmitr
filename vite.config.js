@@ -375,6 +375,75 @@ async function supabaseDsasMiddleware(req, res, env) {
   return true;
 }
 
+async function supabaseNbfcsMiddleware(req, res, env) {
+  if (!req.url.startsWith("/api/nbfcs")) return false;
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceRole = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRole) {
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Supabase is not configured" }));
+    return true;
+  }
+  const headers = { apikey: serviceRole, Authorization: `Bearer ${serviceRole}`, "Content-Type": "application/json" };
+  if (req.method === "GET") {
+    const response = await fetch(`${supabaseUrl}/rest/v1/custom_nbfcs?select=id,payload,updated_at&order=updated_at.desc`, { headers });
+    const data = await response.json().catch(() => []);
+    res.statusCode = response.ok ? 200 : 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ nbfcs: Array.isArray(data) ? data.map(row => ({ ...row.payload, id: row.id })).filter(item => item.published !== false) : [] }));
+    return true;
+  }
+  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!isValidToken(token, env.ADMIN_PASSWORD)) {
+    res.statusCode = 401;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Admin authentication required" }));
+    return true;
+  }
+  if (req.method === "DELETE") {
+    const id = new URL(req.url, "http://localhost").searchParams.get("id")?.trim();
+    if (!id) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "NBFC id is required" }));
+      return true;
+    }
+    const response = await fetch(`${supabaseUrl}/rest/v1/custom_nbfcs?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers });
+    res.statusCode = response.ok ? 200 : 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(response.ok ? { removed: id } : { error: await response.text() }));
+    return true;
+  }
+  if (req.method !== "POST") {
+    res.statusCode = 405;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Method not allowed" }));
+    return true;
+  }
+  let body = "";
+  req.setEncoding("utf8");
+  req.on("data", chunk => { body += chunk; });
+  req.on("end", async () => {
+    try {
+      const item = JSON.parse(body || "{}").nbfc;
+      if (!item || typeof item.name !== "string" || !item.name.trim() || typeof item.loanType !== "string" || !item.loanType.trim()) throw new Error("NBFC name and loan category are required");
+      const id = item.id?.trim() || `custom-nbfc-${Date.now()}`;
+      const payload = { ...item, id, name: item.name.trim(), type: "nbfc", published: item.published !== false };
+      const response = await fetch(`${supabaseUrl}/rest/v1/custom_nbfcs`, { method: "POST", headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ id, payload, updated_at: new Date().toISOString() }) });
+      const text = await response.text();
+      res.statusCode = response.ok ? 200 : 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(response.ok ? { nbfc: payload } : { error: text || "Failed to save NBFC" }));
+    } catch (error) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: error.message }));
+    }
+  });
+  return true;
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
@@ -400,6 +469,12 @@ export default defineConfig(({ mode }) => {
           }
           if (req.url.startsWith("/api/dsas")) {
             supabaseDsasMiddleware(req, res, env).then((handled) => {
+              if (!handled) next();
+            });
+            return;
+          }
+          if (req.url.startsWith("/api/nbfcs")) {
+            supabaseNbfcsMiddleware(req, res, env).then((handled) => {
               if (!handled) next();
             });
             return;
