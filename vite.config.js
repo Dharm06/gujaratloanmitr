@@ -84,6 +84,75 @@ async function supabaseRatesMiddleware(req, res, env) {
     return true;
   }
 
+  async function supabaseSchemesMiddleware(req, res, env) {
+    if (!req.url.startsWith("/api/schemes")) return false;
+
+    const supabaseUrl = env.SUPABASE_URL;
+    const serviceRole = env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!supabaseUrl || !serviceRole) {
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Supabase is not configured" }));
+      return true;
+    }
+
+    const headers = {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      "Content-Type": "application/json",
+    };
+    if (req.method === "GET") {
+      const response = await fetch(`${supabaseUrl}/rest/v1/government_schemes?select=id,payload,updated_at&order=updated_at.desc`, { headers });
+      const data = await response.json().catch(() => []);
+      res.statusCode = response.ok ? 200 : 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ schemes: Array.isArray(data) ? data.map(row => ({ ...row.payload, id: row.id })) : [] }));
+      return true;
+    }
+
+    if (req.method !== "POST") {
+      res.statusCode = 405;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return true;
+    }
+
+    const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    if (!isValidToken(token, env.ADMIN_PASSWORD)) {
+      res.statusCode = 401;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Admin authentication required" }));
+      return true;
+    }
+
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", async () => {
+      try {
+        const schemes = JSON.parse(body || "{}").schemes;
+        if (!Array.isArray(schemes) || schemes.some(scheme => !scheme || typeof scheme.id !== "string" || !scheme.id.trim())) {
+          throw new Error("Invalid schemes payload");
+        }
+        const rows = schemes.map(scheme => ({ id: scheme.id.trim(), payload: scheme, updated_at: new Date().toISOString() }));
+        const response = await fetch(`${supabaseUrl}/rest/v1/government_schemes`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify(rows),
+        });
+        const text = await response.text();
+        res.statusCode = response.ok ? 200 : 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(response.ok ? { saved: rows.length } : { error: text || "Failed to save schemes" }));
+      } catch (error) {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: error.message }));
+      }
+    });
+    return true;
+  }
+
   const authHeader = req.headers.authorization || "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
 
@@ -158,6 +227,154 @@ async function supabaseRatesMiddleware(req, res, env) {
   return true;
 }
 
+async function supabaseSchemesMiddleware(req, res, env) {
+  if (!req.url.startsWith("/api/schemes")) return false;
+
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceRole = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRole) {
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Supabase is not configured" }));
+    return true;
+  }
+
+  const headers = {
+    apikey: serviceRole,
+    Authorization: `Bearer ${serviceRole}`,
+    "Content-Type": "application/json",
+  };
+
+  if (req.method === "GET") {
+    const response = await fetch(`${supabaseUrl}/rest/v1/government_schemes?select=id,payload,updated_at&order=updated_at.desc`, { headers });
+    const data = await response.json().catch(() => []);
+    res.statusCode = response.ok ? 200 : 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ schemes: Array.isArray(data) ? data.map(row => ({ ...row.payload, id: row.id })) : [] }));
+    return true;
+  }
+
+  if (req.method !== "POST") {
+    res.statusCode = 405;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Method not allowed" }));
+    return true;
+  }
+
+  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!isValidToken(token, env.ADMIN_PASSWORD)) {
+    res.statusCode = 401;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Admin authentication required" }));
+    return true;
+  }
+
+  let body = "";
+  req.setEncoding("utf8");
+  req.on("data", chunk => { body += chunk; });
+  req.on("end", async () => {
+    try {
+      const schemes = JSON.parse(body || "{}").schemes;
+      if (!Array.isArray(schemes) || schemes.some(scheme => !scheme || typeof scheme.id !== "string" || !scheme.id.trim())) {
+        throw new Error("Invalid schemes payload");
+      }
+      const rows = schemes.map(scheme => ({ id: scheme.id.trim(), payload: scheme, updated_at: new Date().toISOString() }));
+      const response = await fetch(`${supabaseUrl}/rest/v1/government_schemes`, {
+        method: "POST",
+        headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(rows),
+      });
+      const text = await response.text();
+      res.statusCode = response.ok ? 200 : 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(response.ok ? { saved: rows.length } : { error: text || "Failed to save schemes" }));
+    } catch (error) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: error.message }));
+    }
+  });
+  return true;
+}
+
+async function supabaseDsasMiddleware(req, res, env) {
+  if (!req.url.startsWith("/api/dsas")) return false;
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceRole = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRole) {
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Supabase is not configured" }));
+    return true;
+  }
+  const headers = { apikey: serviceRole, Authorization: `Bearer ${serviceRole}`, "Content-Type": "application/json" };
+  if (req.method === "GET") {
+    const response = await fetch(`${supabaseUrl}/rest/v1/dsa_profiles?select=id,payload,updated_at&order=updated_at.desc`, { headers });
+    const data = await response.json().catch(() => []);
+    res.statusCode = response.ok ? 200 : 500;
+    res.setHeader("Content-Type", "application/json");
+    const isAdmin = isValidToken((req.headers.authorization || "").replace(/^Bearer\s+/i, ""), env.ADMIN_PASSWORD);
+    res.end(JSON.stringify({ profiles: Array.isArray(data) ? data.map(row => ({ ...row.payload, id: row.id })).filter(profile => isAdmin || profile.published !== false) : [] }));
+    return true;
+  }
+  if (req.method === "DELETE") {
+    const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    if (!isValidToken(token, env.ADMIN_PASSWORD)) {
+      res.statusCode = 401;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Admin authentication required" }));
+      return true;
+    }
+    const id = new URL(req.url, "http://localhost").searchParams.get("id")?.trim();
+    if (!id) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "DSA profile id is required" }));
+      return true;
+    }
+    const response = await fetch(`${supabaseUrl}/rest/v1/dsa_profiles?id=eq.${encodeURIComponent(id)}`, { method: "DELETE", headers });
+    res.statusCode = response.ok ? 200 : 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(response.ok ? { removed: id } : { error: await response.text() }));
+    return true;
+  }
+  if (req.method !== "POST") {
+    res.statusCode = 405;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Method not allowed" }));
+    return true;
+  }
+  const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!isValidToken(token, env.ADMIN_PASSWORD)) {
+    res.statusCode = 401;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Admin authentication required" }));
+    return true;
+  }
+  let body = "";
+  req.setEncoding("utf8");
+  req.on("data", chunk => { body += chunk; });
+  req.on("end", async () => {
+    try {
+      const profiles = JSON.parse(body || "{}").profiles;
+      if (!Array.isArray(profiles) || profiles.some(profile => !profile || typeof profile.id !== "string" || !profile.id.trim() || typeof profile.name !== "string" || !profile.name.trim())) {
+        throw new Error("Each DSA profile requires an id and name");
+      }
+      const rows = profiles.map(profile => ({ id: profile.id.trim(), payload: profile, updated_at: new Date().toISOString() }));
+      const response = await fetch(`${supabaseUrl}/rest/v1/dsa_profiles`, { method: "POST", headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(rows) });
+      const text = await response.text();
+      res.statusCode = response.ok ? 200 : 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(response.ok ? { saved: rows.length } : { error: text || "Failed to save DSA profiles" }));
+    } catch (error) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: error.message }));
+    }
+  });
+  return true;
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
@@ -171,6 +388,18 @@ export default defineConfig(({ mode }) => {
           }
           if (req.url.startsWith("/api/rates")) {
             supabaseRatesMiddleware(req, res, env).then((handled) => {
+              if (!handled) next();
+            });
+            return;
+          }
+          if (req.url.startsWith("/api/schemes")) {
+            supabaseSchemesMiddleware(req, res, env).then((handled) => {
+              if (!handled) next();
+            });
+            return;
+          }
+          if (req.url.startsWith("/api/dsas")) {
+            supabaseDsasMiddleware(req, res, env).then((handled) => {
               if (!handled) next();
             });
             return;

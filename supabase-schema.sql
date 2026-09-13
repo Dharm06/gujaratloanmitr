@@ -9,3 +9,19 @@ create table if not exists public.loan_rates (
 );
 
 alter table public.loan_rates enable row level security;
+
+create table if not exists public.government_schemes (
+  id text primary key,
+  payload jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.government_schemes enable row level security;
+
+create table if not exists public.dsa_profiles (
+  id text primary key,
+  payload jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.dsa_profiles enable row level security;

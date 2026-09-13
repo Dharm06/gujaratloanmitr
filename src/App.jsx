@@ -49,6 +49,7 @@ function BottomNav({ active, setPage, isGu }) {
     { id: "compare", icon: "🔍", label: isGu ? "સરખાવો" : "Compare" },
     { id: "emi", icon: "🧮", label: "EMI" },
     { id: "schemes", icon: "🏛️", label: isGu ? "યોજના" : "Schemes" },
+    { id: "dsas", icon: "🤝", label: isGu ? "DSA" : "DSA Profiles" },
     { id: "news", icon: "📰", label: isGu ? "સમાચાર" : "News" },
   ];
   return (
@@ -70,6 +71,7 @@ function DesktopChrome({ active, setPage, isGu, setShowSearch }) {
     { id: "compare", icon: "⌕", label: isGu ? "સરખાવો" : "Compare Loans" },
     { id: "emi", icon: "∑", label: "EMI Calculator" },
     { id: "schemes", icon: "▣", label: isGu ? "યોજના" : "Government Schemes" },
+    { id: "dsas", icon: "♙", label: isGu ? "DSA" : "DSA Profiles" },
     { id: "news", icon: "◈", label: isGu ? "સમાચાર" : "News & Alerts" },
   ];
   return (
@@ -84,21 +86,25 @@ function DesktopChrome({ active, setPage, isGu, setShowSearch }) {
       </nav>
       <div className="desktop-sidebar-card">
         <span className="desktop-sidebar-card-icon">✓</span>
-        <strong>Trusted data</strong>
-        <p>Rates from RBI and official bank websites, updated weekly.</p>
+        <strong>Indicative information</strong>
+        <p>Rates and charges are indicative and may change. Please confirm current terms directly with the lender before applying.</p>
       </div>
       <div className="desktop-sidebar-footer">ગુજરાત માટે બનાવેલ<br /><span>Secure · Simple · Transparent</span></div>
     </aside>
   );
 }
 
-function AdminPage({ lang, setLang, bankData, setBankData }) {
+function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, dsaProfiles, setDsaProfiles }) {
   const [authenticated, setAuthenticated] = useState(() => Boolean(sessionStorage.getItem("adminToken")));
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [saveStatus, setSaveStatus] = useState("");
   const [loanType, setLoanType] = useState("home");
   const [bankId, setBankId] = useState(bankData.home?.[0]?.id);
+  const [schemeId, setSchemeId] = useState(schemes[0]?.id || "");
+  const [schemeStatus, setSchemeStatus] = useState("");
+  const [dsaId, setDsaId] = useState(dsaProfiles[0]?.id || "");
+  const [dsaStatus, setDsaStatus] = useState("");
   const isGu = lang === "gu";
   const banks = bankData[loanType] || [];
   const selected = banks.find(bank => bank.id === Number(bankId)) || banks[0];
@@ -142,6 +148,37 @@ function AdminPage({ lang, setLang, bankData, setBankData }) {
   }, []);
 
   useEffect(() => {
+    fetch("/api/dsas", { headers: { Authorization: `Bearer ${sessionStorage.getItem("adminToken") || ""}` } })
+      .then(response => {
+        if (!response.ok) throw new Error(`DSA API returned ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (Array.isArray(data.profiles) && data.profiles.length > 0) {
+          setDsaProfiles(current => [...current.filter(profile => !data.profiles.some(saved => saved.id === profile.id)), ...data.profiles]);
+        }
+      })
+      .catch(error => console.warn("Saved DSA profiles unavailable; showing default profiles.", error));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/schemes")
+      .then(response => {
+        if (!response.ok) throw new Error(`Schemes API returned ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (Array.isArray(data.schemes) && data.schemes.length > 0) {
+          setSchemes(current => {
+            const savedById = new Map(data.schemes.map(scheme => [scheme.id, scheme]));
+            return [...current.map(scheme => savedById.get(scheme.id) || scheme), ...data.schemes.filter(scheme => !current.some(existing => existing.id === scheme.id))];
+          });
+        }
+      })
+      .catch(error => console.warn("Saved schemes unavailable; showing default schemes.", error));
+  }, []);
+
+  useEffect(() => {
     setBankId(bankData[loanType]?.[0]?.id);
   }, [loanType, bankData]);
 
@@ -175,6 +212,79 @@ function AdminPage({ lang, setLang, bankData, setBankData }) {
     setSaveStatus("Rates saved for all users");
   };
 
+  const selectedScheme = schemes.find(scheme => scheme.id === schemeId) || schemes[0];
+  const updateScheme = (field, value) => {
+    if (!selectedScheme) return;
+    setSchemes(current => current.map(scheme => scheme.id === selectedScheme.id ? { ...scheme, [field]: value } : scheme));
+  };
+  const addScheme = () => {
+    const id = `scheme-${Date.now()}`;
+    const scheme = {
+      id, name: "New Government Scheme", nameGu: "", icon: "🏛️", color: "#B8860B",
+      tag: "Business", tagGu: "", deadline: null, oneLiner: "", oneLinerGu: "",
+      limit: "", limitGu: "", rate: "", rateGu: "", fee: "", feeGu: "",
+      whyGood: [], whyGoodGu: [], categories: [], eligibility: [], eligibilityGu: [],
+      whereToApply: "", whereToApplyGu: "",
+    };
+    setSchemes(current => [...current, scheme]);
+    setSchemeId(id);
+  };
+  const saveSchemes = async () => {
+    setSchemeStatus("Saving...");
+    const response = await fetch("/api/schemes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("adminToken")}` },
+      body: JSON.stringify({ schemes }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setSchemeStatus(result.error || "Unable to save schemes");
+      return;
+    }
+    setSchemeStatus("Government schemes saved for all users");
+  };
+  const selectedDsa = dsaProfiles.find(profile => profile.id === dsaId) || dsaProfiles[0];
+  const updateDsa = (field, value) => {
+    if (!selectedDsa) return;
+    setDsaProfiles(current => current.map(profile => profile.id === selectedDsa.id ? { ...profile, [field]: value } : profile));
+  };
+  const addDsa = () => {
+    const id = `dsa-${Date.now()}`;
+    setDsaProfiles(current => [...current, { id, name: "New DSA", photo: "", workspacePhoto1: "", workspacePhoto2: "", designation: "Loan Advisor", city: "", phone: "", email: "", experience: "", description: "", specializations: "", languages: "Gujarati, Hindi, English", published: true }]);
+    setDsaId(id);
+  };
+  const saveDsas = async () => {
+    setDsaStatus("Saving...");
+    const response = await fetch("/api/dsas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionStorage.getItem("adminToken")}` },
+      body: JSON.stringify({ profiles: dsaProfiles }),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setDsaStatus(result.error || "Unable to save DSA profiles");
+      return;
+    }
+    setDsaStatus("DSA profiles published for all users");
+  };
+  const removeDsa = async () => {
+    if (!selectedDsa || !window.confirm(`Remove ${selectedDsa.name} from DSA profiles?`)) return;
+    setDsaStatus("Removing...");
+    const response = await fetch(`/api/dsas?id=${encodeURIComponent(selectedDsa.id)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${sessionStorage.getItem("adminToken")}` },
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setDsaStatus(result.error || "Unable to remove DSA profile");
+      return;
+    }
+    const remaining = dsaProfiles.filter(profile => profile.id !== selectedDsa.id);
+    setDsaProfiles(remaining);
+    setDsaId(remaining[0]?.id || "");
+    setDsaStatus("DSA profile removed");
+  };
+
   if (!authenticated) return (
     <div className="loan-page admin-login-page" style={S.page}>
       <div className="admin-login-card">
@@ -198,7 +308,6 @@ function AdminPage({ lang, setLang, bankData, setBankData }) {
       <div style={{ ...S.header, paddingBottom: 18 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div><p style={{ color: "#B8860B", fontSize: 10, fontWeight: 800, letterSpacing: 1.4, margin: 0 }}>CONTROL CENTER</p><h2 style={{ color: "#2B2115", fontSize: 22, fontWeight: 800, margin: "4px 0 0" }}>Admin Dashboard</h2></div>
-          <button onClick={() => setLang(isGu ? "en" : "gu")} style={{ background: "rgba(184,134,11,0.12)", border: "1px solid rgba(184,134,11,0.3)", borderRadius: 20, padding: "6px 12px", color: "#B8860B", fontWeight: 700, cursor: "pointer" }}>{isGu ? "EN" : "ગુ"}</button>
         </div>
       </div>
       <div style={{ padding: "18px 16px" }}>
@@ -226,6 +335,54 @@ function AdminPage({ lang, setLang, bankData, setBankData }) {
         </div>
         <button onClick={saveRates} style={{ width: "100%", padding: 14, ...S.orange, fontSize: 14 }}>Save rates for everyone</button>
         {saveStatus && <p style={{ color: saveStatus === "Saving..." ? "#B8860B" : "#16803c", fontSize: 11, textAlign: "center", margin: "12px 0 0" }}>{saveStatus}</p>}
+        <div style={{ ...S.card, marginTop: 22 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <h3 style={{ color: "#2B2115", fontSize: 15, margin: 0 }}>Government schemes</h3>
+            <button onClick={addScheme} style={{ ...S.orange, padding: "8px 10px", fontSize: 11 }}>+ Add scheme</button>
+          </div>
+          <select value={selectedScheme?.id || ""} onChange={event => setSchemeId(event.target.value)} style={{ width: "100%", padding: 12, marginBottom: 12, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 10, background: "#fff" }}>
+            {schemes.map(scheme => <option key={scheme.id} value={scheme.id}>{scheme.name}</option>)}
+          </select>
+          {selectedScheme && <div style={{ display: "grid", gap: 10 }}>
+            {[
+              ["name", "Scheme name"], ["nameGu", "Gujarati name"], ["tag", "Category"], ["oneLiner", "Short description"],
+              ["limit", "Loan limit / benefit"], ["rate", "Interest / benefit rate"], ["fee", "Fee"], ["deadline", "Deadline"],
+              ["whereToApply", "Where to apply"],
+            ].map(([field, label]) => (
+              <label key={field} style={{ color: "rgba(43,33,21,0.55)", fontSize: 10, fontWeight: 700 }}>
+                {label}
+                <input value={selectedScheme[field] || ""} onChange={event => updateScheme(field, event.target.value)} style={{ display: "block", width: "100%", marginTop: 5, padding: "10px", border: "1px solid rgba(184,134,11,0.2)", borderRadius: 9, color: "#2B2115", fontSize: 12 }} />
+              </label>
+            ))}
+          </div>}
+          <button onClick={saveSchemes} style={{ width: "100%", padding: 13, marginTop: 14, ...S.orange, fontSize: 13 }}>Publish schemes for everyone</button>
+          {schemeStatus && <p style={{ color: schemeStatus === "Saving..." ? "#B8860B" : "#16803c", fontSize: 11, textAlign: "center", margin: "10px 0 0" }}>{schemeStatus}</p>}
+        </div>
+        <div style={{ ...S.card, marginTop: 22 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <h3 style={{ color: "#2B2115", fontSize: 15, margin: 0 }}>DSA profiles</h3>
+            <button onClick={addDsa} style={{ ...S.orange, padding: "8px 10px", fontSize: 11 }}>+ Add DSA</button>
+          </div>
+          <p style={{ color: "rgba(43,33,21,0.55)", fontSize: 11, lineHeight: 1.5, margin: "0 0 12px" }}>Add image URLs for the profile photo and two workspace photos. Only published profiles appear publicly.</p>
+          <select value={selectedDsa?.id || ""} onChange={event => setDsaId(event.target.value)} style={{ width: "100%", padding: 12, marginBottom: 12, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 10, background: "#fff" }}>
+            {dsaProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+          </select>
+          {selectedDsa && <div style={{ display: "grid", gap: 10 }}>
+            {[
+              ["name", "Full name"], ["designation", "Designation"], ["city", "City / service area"], ["phone", "Phone"], ["email", "Email"], ["experience", "Experience"], ["specializations", "Loan specializations"], ["languages", "Languages"], ["photo", "Profile photo URL"], ["workspacePhoto1", "Workspace photo 1 URL"], ["workspacePhoto2", "Workspace photo 2 URL"], ["description", "Professional description"],
+            ].map(([field, label]) => (
+              <label key={field} style={{ color: "rgba(43,33,21,0.55)", fontSize: 10, fontWeight: 700 }}>{label}
+                {field === "description" ? <textarea value={selectedDsa[field] || ""} onChange={event => updateDsa(field, event.target.value)} rows={4} style={{ display: "block", width: "100%", marginTop: 5, padding: 10, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 9, color: "#2B2115", fontSize: 12, resize: "vertical" }} /> : <input value={selectedDsa[field] || ""} onChange={event => updateDsa(field, event.target.value)} style={{ display: "block", width: "100%", marginTop: 5, padding: "10px", border: "1px solid rgba(184,134,11,0.2)", borderRadius: 9, color: "#2B2115", fontSize: 12 }} />}
+              </label>
+            ))}
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: "rgba(43,33,21,0.65)", fontSize: 11, fontWeight: 700 }}>
+              <input type="checkbox" checked={selectedDsa.published !== false} onChange={event => updateDsa("published", event.target.checked)} /> Publish this profile
+            </label>
+          </div>}
+          <button onClick={saveDsas} style={{ width: "100%", padding: 13, marginTop: 14, ...S.orange, fontSize: 13 }}>Publish DSA profiles</button>
+          {selectedDsa && <button onClick={removeDsa} style={{ width: "100%", padding: 12, marginTop: 8, background: "#fff", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 12, color: "#B42318", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Remove selected DSA</button>}
+          {dsaStatus && <p style={{ color: dsaStatus === "Saving..." ? "#B8860B" : "#16803c", fontSize: 11, textAlign: "center", margin: "10px 0 0" }}>{dsaStatus}</p>}
+        </div>
       </div>
     </div>
   );
@@ -243,7 +400,6 @@ function DesktopHeader({ isGu, setLang, setShowSearch }) {
       </div>
       <div className="desktop-header-actions">
         <button className="desktop-search" onClick={() => setShowSearch(true)}><span>⌕</span>{isGu ? "લોન, બેંક અથવા योजना શોધો..." : "Search loans, banks or schemes..."}</button>
-        <button className="desktop-language" onClick={() => setLang(isGu ? "en" : "gu")}>{isGu ? "EN" : "ગુ"}</button>
       </div>
     </header>
   );
@@ -297,14 +453,13 @@ function TickerBar({ items }) {
 // ─── LOAN META ────────────────────────────────────────────────────────────────
 const LOAN_META = {
   home: { label: "Home Loan", labelGu: "હોમ લોન", icon: "🏠", logo: "/homeloanlogo.png", defaultRate: 8.50, minAmt: 500000, maxAmt: 50000000, defaultAmt: 3000000, maxTenure: 30 },
-  personal: { label: "Personal Loan", labelGu: "પર્સનલ લોન", icon: "💰", logo: "/persnolloanlogo.png", defaultRate: 10.50, minAmt: 50000, maxAmt: 5000000, defaultAmt: 500000, maxTenure: 7 },
+  mortgage: { label: "Mortgage Loan", labelGu: "મોર્ગેજ લોન", icon: "🏦", logo: "/laploan.png", defaultRate: 9.75, minAmt: 1000000, maxAmt: 100000000, defaultAmt: 5000000, maxTenure: 15 },
   sme: { label: "SME / Business", labelGu: "SME લોન", icon: "🏢", logo: "/bussinessloanlogo.png", defaultRate: 9.50, minAmt: 500000, maxAmt: 50000000, defaultAmt: 2000000, maxTenure: 15 },
-  vehicle4w: { label: "4 Wheeler", labelGu: "4 વ્હીલર", icon: "🚗", logo: "/carloan.png", defaultRate: 9.00, minAmt: 100000, maxAmt: 10000000, defaultAmt: 700000, maxTenure: 7 },
-  usedcar: { label: "Used Car", labelGu: "જૂની ગાડી", icon: "🚙", logo: "/carloan.png", defaultRate: 11.00, minAmt: 50000, maxAmt: 3000000, defaultAmt: 400000, maxTenure: 5 },
-  vehicle2w: { label: "2 Wheeler", labelGu: "2 વ્હીલર", icon: "🛵", logo: "/2wheelerloan.png", defaultRate: 12.00, minAmt: 20000, maxAmt: 500000, defaultAmt: 100000, maxTenure: 4 },
-  gold: { label: "Gold Loan", labelGu: "ગોલ્ડ લોન", icon: "💎", logo: "/goldloanlogo.png", defaultRate: 8.75, minAmt: 10000, maxAmt: 5000000, defaultAmt: 200000, maxTenure: 3 },
-  lap: { label: "LAP", labelGu: "મિલકત લોન", icon: "🏗️", logo: "/laploan.png", defaultRate: 9.75, minAmt: 1000000, maxAmt: 100000000, defaultAmt: 5000000, maxTenure: 15 },
-  kisan: { label: "Kisan Loan", labelGu: "કિસાન લોન", icon: "🌾", logo: "/homeloanlogo.png", defaultRate: 7.00, minAmt: 50000, maxAmt: 3000000, defaultAmt: 300000, maxTenure: 5 },
+  personal: { label: "Personal Loan", labelGu: "પર્સનલ લોન", icon: "💰", logo: "/persnolloanlogo.png", defaultRate: 10.50, minAmt: 50000, maxAmt: 5000000, defaultAmt: 500000, maxTenure: 7 },
+  car: { label: "Car Loan", labelGu: "કાર લોન", icon: "🚗", logo: "/carloan.png", defaultRate: 9.00, minAmt: 100000, maxAmt: 10000000, defaultAmt: 700000, maxTenure: 7 },
+  commercial: { label: "Commercial Vehicle", labelGu: "કોમર્શિયલ વાહન", icon: "🚚", logo: "/carloan.png", defaultRate: 10.00, minAmt: 100000, maxAmt: 15000000, defaultAmt: 1200000, maxTenure: 7 },
+  education: { label: "Education Loan", labelGu: "એજ્યુકેશન લોન", icon: "🎓", logo: "/bussinessloanlogo.png", defaultRate: 8.50, minAmt: 50000, maxAmt: 3000000, defaultAmt: 500000, maxTenure: 15 },
+  usedcommercial: { label: "Used Commercial Vehicle", labelGu: "જૂનું કોમર્શિયલ વાહન", icon: "🚛", logo: "/carloan.png", defaultRate: 12.00, minAmt: 100000, maxAmt: 10000000, defaultAmt: 800000, maxTenure: 6 },
 };
 
 // ─── BANK DATA ────────────────────────────────────────────────────────────────
@@ -464,6 +619,23 @@ const BANK_DATA = {
   ],
 };
 
+const NBFC_DIRECTORY = [
+  "UGRO Capital", "Nido Home Finance", "InCred", "Muthoot Finance", "MAS Financial Services",
+  "Clix Capital", "Grihasakti", "Cholamandalam Finance", "Kogta Financial", "TruHome Finance",
+  "Rathi Group", "Hiranandani Financial", "Aavas Financiers", "Aadhar Housing Finance",
+  "HomeFirst Finance", "IKF Finance", "SRG Housing Finance", "AU Small Finance Bank",
+  "Aditya Birla Finance", "Hero FinCorp", "Ujjivan Small Finance Bank", "Jana Small Finance Bank",
+  "DCB Bank", "Tata Capital", "Credit Saison", "Equitas Small Finance Bank", "Protium Finance",
+  "NeoGrowth Credit", "Ratnaafin Capital", "Utkarsh Small Finance Bank", "IIFL Finance", "Bandhan Bank",
+];
+
+// Keep the requested loan categories backed by the closest existing lender data.
+BANK_DATA.mortgage = BANK_DATA.lap.map(bank => ({ ...bank }));
+BANK_DATA.car = BANK_DATA.vehicle4w.map(bank => ({ ...bank }));
+BANK_DATA.commercial = BANK_DATA.vehicle4w.map(bank => ({ ...bank }));
+BANK_DATA.education = BANK_DATA.personal.map(bank => ({ ...bank }));
+BANK_DATA.usedcommercial = BANK_DATA.usedcar.map(bank => ({ ...bank }));
+
 // ─── GOVERNMENT SCHEMES ───────────────────────────────────────────────────────
 const GOVT_SCHEMES = [
   {
@@ -618,7 +790,7 @@ const S = {
 };
 
 // ─── SEARCH MODAL ─────────────────────────────────────────────────────────────
-function SearchModal({ onClose, setPage, setCompareType, lang }) {
+function SearchModal({ onClose, setPage, setCompareType, lang, profiles }) {
   const [q, setQ] = useState("");
   const isGu = lang === "gu";
   const ref = useRef(null);
@@ -626,16 +798,52 @@ function SearchModal({ onClose, setPage, setCompareType, lang }) {
 
   const allItems = [
     ...Object.entries(LOAN_META).map(([k, v]) => ({ label: v.label, labelGu: v.labelGu, icon: v.logo || v.icon, type: "loan", key: k })),
-    ...Object.values(BANK_DATA).flat().filter((b, i, arr) => arr.findIndex(x => x.name === b.name) === i).map(b => ({ label: b.name, labelGu: b.name, icon: "🏦", type: "bank", key: b.slug || b.name })),
+    ...Object.entries(BANK_DATA).flatMap(([loanType, banks]) => banks.map(bank => ({
+      label: bank.name,
+      labelGu: bank.name,
+      icon: "🏦",
+      type: "bank",
+      key: bank.slug || bank.name,
+      loanType,
+      searchTerms: [bank.name, bank.short, bank.slug].filter(Boolean).join(" "),
+    }))).filter((bank, i, all) => all.findIndex(item => item.label === bank.label) === i),
+    ...NBFC_DIRECTORY
+      .filter(name => !Object.values(BANK_DATA).flat().some(bank => bank.name.toLowerCase() === name.toLowerCase()))
+      .map(name => ({
+        label: name,
+        labelGu: name,
+        icon: "🏦",
+        type: "bank",
+        key: name,
+        loanType: "home",
+        searchTerms: name,
+      })),
     ...GOVT_SCHEMES.map(s => ({ label: s.name, labelGu: s.nameGu, icon: s.icon, type: "scheme", key: s.id })),
+    ...profiles.map(profile => ({
+      label: profile.name,
+      labelGu: profile.name,
+      icon: profile.photo || "🤝",
+      type: "dsa",
+      key: profile.id,
+      searchTerms: [profile.name, profile.designation, profile.city, profile.specializations, profile.languages].filter(Boolean).join(" "),
+    })),
   ];
 
-  const results = q.length > 1 ? allItems.filter(item => item.label.toLowerCase().includes(q.toLowerCase()) || item.labelGu?.includes(q)) : [];
+  const results = q.length > 1 ? allItems.filter(item => {
+    const query = q.trim().toLowerCase();
+    return item.label.toLowerCase().includes(query)
+      || item.labelGu?.toLowerCase().includes(query)
+      || item.searchTerms?.toLowerCase().includes(query);
+  }) : [];
 
   const handleSelect = (item) => {
     if (item.type === "loan") { setCompareType(item.key); setPage("compare"); }
     else if (item.type === "scheme") { setPage("schemes"); }
-    else { setPage("compare"); }
+    else if (item.type === "dsa") { setPage("dsas"); }
+    else {
+      if (item.loanType) setCompareType(item.loanType);
+      setPage("compare");
+    }
     onClose();
   };
 
@@ -667,7 +875,7 @@ function SearchModal({ onClose, setPage, setCompareType, lang }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {results.map((item, i) => (
             <button key={i} onClick={() => handleSelect(item)} style={{ background: "#FFFFFF", border: "1px solid rgba(184,134,11,0.15)", borderRadius: 14, padding: "14px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", textAlign: "left" }}>
-              {item.type === "loan" ? <LoanTypeLogo type={item.key} size={24} /> : <span style={{ fontSize: 24 }}>{item.icon}</span>}
+              {item.type === "loan" ? <LoanTypeLogo type={item.key} size={24} /> : item.type === "dsa" && item.icon.startsWith("http") ? <img src={item.icon} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: "50%" }} /> : <span style={{ fontSize: 24 }}>{item.icon}</span>}
               <div>
                 <p style={{ color: "#2B2115", fontSize: 14, fontWeight: 600, margin: 0 }}>{isGu ? item.labelGu : item.label}</p>
                 <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 11, margin: "2px 0 0", textTransform: "capitalize" }}>{item.type}</p>
@@ -699,7 +907,6 @@ function HomePage({ name, lang, setLang, setPage, setCompareType, showSearch, se
     <div className="loan-page" style={S.page}>
       <div style={{ ...S.header, paddingBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 12 }}>
-          <button onClick={() => setLang(isGu ? "en" : "gu")} style={{ background: "rgba(184,134,11,0.12)", border: "1px solid rgba(184,134,11,0.3)", borderRadius: 20, padding: "5px 12px", color: "#B8860B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{isGu ? "EN" : "ગુ"}</button>
         </div>
         <button onClick={() => setShowSearch(true)} style={{ width: "100%", background: "linear-gradient(180deg, #FFFFFF 0%, #FFFDF8 100%)", border: "1px solid rgba(184,134,11,0.2)", borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", boxShadow: "0 8px 18px rgba(184,134,11,0.08)" }}>
           <span style={{ fontSize: 16, display: "inline-flex", width: 24, height: 24, borderRadius: 8, background: "rgba(184,134,11,0.08)", alignItems: "center", justifyContent: "center" }}>🔍</span>
@@ -711,7 +918,7 @@ function HomePage({ name, lang, setLang, setPage, setCompareType, showSearch, se
         {/* Trust bar */}
         <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 10, padding: "8px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 14 }}>✅</span>
-          <span style={{ color: "#0F8F5E", fontSize: 11, fontWeight: 600 }}>{isGu ? "." : "Rates and news sync from official sources when available"}</span>
+          <span style={{ color: "#0F8F5E", fontSize: 11, fontWeight: 600 }}>{isGu ? "." : "Indicative rates only. Lender terms, fees and eligibility may change."}</span>
         </div>
 
         {/* Loan types */}
@@ -778,15 +985,22 @@ function ComparePage({ lang, setLang, initType, setPage, setDetailBank, bankData
   const [expanded, setExpanded] = useState(null);
   const [showCibil, setShowCibil] = useState(false);
   const [showApprovalInfo, setShowApprovalInfo] = useState(false);
+  const [selectedBankIds, setSelectedBankIds] = useState([]);
   const isGu = lang === "gu";
 
-  useEffect(() => { setActiveTab("all"); setExpanded(null); }, [activeType]);
+  useEffect(() => { setActiveTab("all"); setExpanded(null); setSelectedBankIds([]); }, [activeType]);
 
   const banks = (bankData[activeType] || [])
     .filter(b => activeTab === "all" || b.type === activeTab)
     .sort((a, b) => sortBy === "rate" ? a.rate - b.rate : sortBy === "fee" ? a.fee - b.fee : b.approval - a.approval);
 
   const getAC = r => r >= 80 ? "#0F8F5E" : r >= 70 ? "#B8860B" : "#EF4444";
+  const selectedBanks = banks.filter(bank => selectedBankIds.includes(bank.id));
+  const toggleCompareBank = (bankId) => {
+    setSelectedBankIds(current => current.includes(bankId)
+      ? current.filter(id => id !== bankId)
+      : current.length < 2 ? [...current, bankId] : current);
+  };
 
   return (
     <div className="loan-page" style={S.page}>
@@ -797,7 +1011,6 @@ function ComparePage({ lang, setLang, initType, setPage, setDetailBank, bankData
             <h2 style={{ color: "#2B2115", fontSize: 17, fontWeight: 800, margin: 0 }}>{LOAN_META[activeType]?.icon} {isGu ? LOAN_META[activeType]?.labelGu : LOAN_META[activeType]?.label}</h2>
             <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 10, margin: 0 }}>{banks.length} {isGu ? "." : "banks"} • Feb 2026 • <span style={{ color: "#0F8F5E" }}>✅ RBI data</span></p>
           </div>
-          <button onClick={() => setLang(isGu ? "en" : "gu")} style={{ background: "rgba(184,134,11,0.12)", border: "1px solid rgba(184,134,11,0.3)", borderRadius: 20, padding: "5px 12px", color: "#B8860B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{isGu ? "EN" : "ગુ"}</button>
         </div>
         <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 10, scrollbarWidth: "none" }}>
           {Object.entries(LOAN_META).map(([k, v]) => (
@@ -843,6 +1056,36 @@ function ComparePage({ lang, setLang, initType, setPage, setDetailBank, bankData
           </div>
         )}
 
+        <div style={{ background: selectedBanks.length === 2 ? "rgba(16,185,129,0.08)" : "rgba(184,134,11,0.06)", border: `1px solid ${selectedBanks.length === 2 ? "rgba(16,185,129,0.25)" : "rgba(184,134,11,0.18)"}`, borderRadius: 12, padding: "10px 12px", marginBottom: 12 }}>
+          <p style={{ color: selectedBanks.length === 2 ? "#0F8F5E" : "#B8860B", fontSize: 11, fontWeight: 700, margin: 0 }}>
+            {selectedBanks.length === 2
+              ? "Two banks selected — compare their rates, fees and approval below."
+              : `Select ${2 - selectedBanks.length} more bank${selectedBanks.length === 1 ? "" : "s"} to compare.`}
+          </p>
+        </div>
+
+        {selectedBanks.length === 2 && (
+          <div style={{ background: "#FFFFFF", border: "1px solid rgba(184,134,11,0.22)", borderRadius: 16, padding: 12, marginBottom: 14, boxShadow: "0 8px 20px rgba(184,134,11,0.07)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {selectedBanks.map(bank => (
+                <div key={bank.id} style={{ border: "1px solid rgba(184,134,11,0.15)", borderRadius: 12, padding: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+                    <BankLogo slug={bank.slug} name={bank.name} size={28} />
+                    <strong style={{ color: "#2B2115", fontSize: 11, lineHeight: 1.2 }}>{bank.name}</strong>
+                  </div>
+                  {[["Rate", `${bank.rate}%`], ["Fee", bank.fee === 0 ? "Zero" : `${bank.fee}%`], ["Approval", `${bank.approval}%`], ["Max loan", fmtL(bank.maxLoan)]].map(([label, value]) => (
+                    <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 6, padding: "5px 0", borderTop: "1px solid rgba(184,134,11,0.1)" }}>
+                      <span style={{ color: "rgba(43,33,21,0.45)", fontSize: 9 }}>{label}</span>
+                      <span style={{ color: "#2B2115", fontSize: 10, fontWeight: 800 }}>{value}</span>
+                    </div>
+                  ))}
+                  <button onClick={() => toggleCompareBank(bank.id)} style={{ width: "100%", marginTop: 8, padding: "6px", background: "rgba(184,134,11,0.08)", border: "none", borderRadius: 8, color: "#B8860B", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Remove</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {banks.map(bank => (
             <div key={bank.id} onClick={() => setExpanded(expanded === bank.id ? null : bank.id)} style={{ background: expanded === bank.id ? "rgba(184,134,11,0.06)" : "#FFFFFF", border: `1px solid ${expanded === bank.id ? "rgba(184,134,11,0.3)" : "rgba(184,134,11,0.15)"}`, borderRadius: 16, padding: "14px", cursor: "pointer", transition: "all 0.2s", boxShadow: expanded === bank.id ? "0 4px 16px rgba(184,134,11,0.08)" : "0 1px 4px rgba(0,0,0,0.03)" }}>
@@ -855,7 +1098,12 @@ function ComparePage({ lang, setLang, initType, setPage, setDetailBank, bankData
                   </div>
                   <p style={{ color: "rgba(43,33,21,0.4)", fontSize: 10, margin: "2px 0 0", textTransform: "capitalize" }}>{bank.type === "govt" ? (isGu ? "." : "Govt Bank") : bank.type === "private" ? (isGu ? "." : "Private Bank") : bank.type === "nbfc" ? "NBFC" : (isGu ? "." : "Small Finance")}</p>
                 </div>
-                <span style={{ color: "rgba(43,33,21,0.25)", fontSize: 16, transform: expanded === bank.id ? "rotate(180deg)" : "none", transition: "0.2s" }}>⌄</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button onClick={e => { e.stopPropagation(); toggleCompareBank(bank.id); }} style={{ padding: "6px 8px", background: selectedBankIds.includes(bank.id) ? "#B8860B" : "rgba(184,134,11,0.08)", border: "1px solid rgba(184,134,11,0.18)", borderRadius: 8, color: selectedBankIds.includes(bank.id) ? "#fff" : "#B8860B", fontSize: 9, fontWeight: 700, cursor: "pointer" }}>
+                    {selectedBankIds.includes(bank.id) ? "Selected" : "Compare"}
+                  </button>
+                  <span style={{ color: "rgba(43,33,21,0.25)", fontSize: 16, transform: expanded === bank.id ? "rotate(180deg)" : "none", transition: "0.2s" }}>⌄</span>
+                </div>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
                 <div style={{ background: "rgba(184,134,11,0.05)", borderRadius: 10, padding: "10px 6px", textAlign: "center" }}>
@@ -927,6 +1175,8 @@ function DetailPage({ bank, lang, setPage }) {
   const meta = LOAN_META[bank?.loanType || "home"];
   const [loanAmt, setLoanAmt] = useState(meta?.defaultAmt || 2000000);
   const [tenure, setTenure] = useState(10);
+  const [calculatorMode, setCalculatorMode] = useState("loan");
+  const [monthlyBudget, setMonthlyBudget] = useState(Math.round(calcEMI(meta.defaultAmt, meta.defaultRate, 120)));
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [bView, setBView] = useState("yearly");
   const [showApply, setShowApply] = useState(false);
@@ -987,6 +1237,13 @@ function DetailPage({ bank, lang, setPage }) {
             </div>
           ))}
         </div>
+      </div>
+
+      <div style={{ margin: "0 16px 14px", background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.18)", borderRadius: 12, padding: "11px 13px" }}>
+        <p style={{ color: "#2456A6", fontSize: 11, fontWeight: 700, margin: "0 0 4px" }}>Important information</p>
+        <p style={{ color: "rgba(43,33,21,0.65)", fontSize: 10, lineHeight: 1.55, margin: 0 }}>
+          The rate, processing or application/login fee, insurance premium, documentation charges, taxes and other costs shown are indicative and may change without notice. The lender will confirm the applicable rate, charges, eligibility, tenure and final approval after reviewing your application. Please verify the complete loan terms with the lender before accepting any offer.
+        </p>
       </div>
 
       {/* Tabs */}
@@ -1191,6 +1448,8 @@ function EMIPage({ lang, setLang, setPage, setCompareType }) {
   const [loanAmt, setLoanAmt] = useState(meta.defaultAmt);
   const [rate, setRate] = useState(meta.defaultRate);
   const [tenure, setTenure] = useState(10);
+  const [calculatorMode, setCalculatorMode] = useState("loan");
+  const [monthlyBudget, setMonthlyBudget] = useState(Math.round(calcEMI(meta.defaultAmt, meta.defaultRate, 120)));
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [bView, setBView] = useState("yearly");
   const isGu = lang === "gu";
@@ -1199,16 +1458,23 @@ function EMIPage({ lang, setLang, setPage, setCompareType }) {
     setSelType(k);
     setRate(LOAN_META[k].defaultRate);
     setLoanAmt(LOAN_META[k].defaultAmt);
+    setMonthlyBudget(Math.round(calcEMI(LOAN_META[k].defaultAmt, LOAN_META[k].defaultRate, 120)));
     setTenure(Math.min(tenure, LOAN_META[k].maxTenure));
   };
 
   const tm = tenure * 12;
-  const emi = Math.round(calcEMI(loanAmt, rate, tm));
+  const reverseLoanAmount = rate === 0
+    ? monthlyBudget * tm
+    : monthlyBudget * (1 - Math.pow(1 + rate / 12 / 100, -tm)) / (rate / 12 / 100);
+  const calculatedLoanAmount = calculatorMode === "reverse"
+    ? Math.min(meta.maxAmt, Math.max(meta.minAmt, Math.round(reverseLoanAmount)))
+    : loanAmt;
+  const emi = Math.round(calcEMI(calculatedLoanAmount, rate, tm));
   const total = emi * tm;
-  const interest = total - loanAmt;
+  const interest = total - calculatedLoanAmount;
   const iP = Math.round((interest / total) * 100);
   const pP = 100 - iP;
-  const schedule = useMemo(() => calcSchedule(loanAmt, rate, tm), [loanAmt, rate, tm]);
+  const schedule = useMemo(() => calcSchedule(calculatedLoanAmount, rate, tm), [calculatedLoanAmount, rate, tm]);
   const yearly = useMemo(() => Array.from({ length: tenure }, (_, y) => {
     const ms = schedule.slice(y * 12, (y + 1) * 12);
     return { year: y + 1, totalEMI: ms.reduce((s, m) => s + m.emi, 0), totalInterest: ms.reduce((s, m) => s + m.interest, 0), balance: ms[ms.length - 1]?.balance || 0 };
@@ -1223,7 +1489,6 @@ function EMIPage({ lang, setLang, setPage, setCompareType }) {
             <h2 style={{ color: "#2B2115", fontSize: 18, fontWeight: 800, margin: 0 }}>🧮 EMI {isGu ? "." : "Calculator"}</h2>
             <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 11, margin: 0 }}>{isGu ? "." : "Calculate EMI for any loan"}</p>
           </div>
-          <button onClick={() => setLang(isGu ? "en" : "gu")} style={{ background: "rgba(184,134,11,0.12)", border: "1px solid rgba(184,134,11,0.3)", borderRadius: 20, padding: "5px 12px", color: "#B8860B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{isGu ? "EN" : "ગુ"}</button>
         </div>
       </div>
 
@@ -1238,9 +1503,19 @@ function EMIPage({ lang, setLang, setPage, setCompareType }) {
           ))}
         </div>
 
+        <div style={{ display: "flex", gap: 8, padding: 4, background: "rgba(184,134,11,0.06)", borderRadius: 12, marginBottom: 14 }}>
+          {[["loan", "Calculate EMI"], ["reverse", "Calculate eligible loan"]].map(([mode, label]) => (
+            <button key={mode} onClick={() => setCalculatorMode(mode)} style={{ flex: 1, padding: "10px 8px", border: "none", borderRadius: 9, background: calculatorMode === mode ? "#B8860B" : "transparent", color: calculatorMode === mode ? "#fff" : "rgba(43,33,21,0.55)", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div style={{ ...S.card, marginBottom: 14 }}>
           {[
-            { label: isGu ? "." : "Loan Amount", val: loanAmt, set: setLoanAmt, min: meta.minAmt, max: meta.maxAmt, step: 10000, color: "#B8860B", display: fmt(loanAmt) },
+            ...(calculatorMode === "loan"
+              ? [{ label: "Loan Amount", val: loanAmt, set: setLoanAmt, min: meta.minAmt, max: meta.maxAmt, step: 10000, color: "#B8860B", display: fmt(loanAmt) }]
+              : [{ label: "Monthly EMI budget", val: monthlyBudget, set: setMonthlyBudget, min: 1000, max: 300000, step: 500, color: "#B8860B", display: fmt(monthlyBudget) }]),
             { label: isGu ? "." : "Interest Rate", val: rate, set: setRate, min: 5, max: 30, step: 0.25, color: "#3B82F6", display: `${rate.toFixed(2)}%` },
             { label: isGu ? "." : "Tenure", val: tenure, set: setTenure, min: 1, max: meta.maxTenure, step: 1, color: "#0F8F5E", display: `${tenure} ${isGu ? "." : "yrs"} (${tm} months)` },
           ].map((item, i) => (
@@ -1252,13 +1527,14 @@ function EMIPage({ lang, setLang, setPage, setCompareType }) {
               <input type="range" min={item.min} max={item.max} step={item.step} value={item.val} onChange={e => item.set(Number(e.target.value))} style={{ width: "100%", accentColor: item.color }} />
             </div>
           ))}
+          {calculatorMode === "reverse" && <p style={{ color: "rgba(43,33,21,0.5)", fontSize: 11, margin: "14px 0 0", lineHeight: 1.5 }}>Based on this EMI budget, you may qualify for approximately <strong style={{ color: "#B8860B" }}>{fmt(calculatedLoanAmount)}</strong>.</p>}
         </div>
 
         <div style={{ background: "linear-gradient(135deg,rgba(212,175,55,0.16),rgba(184,134,11,0.07))", border: "1px solid rgba(184,134,11,0.3)", borderRadius: 18, padding: "20px", marginBottom: 14 }}>
           <p style={{ color: "rgba(43,33,21,0.5)", fontSize: 12, margin: "0 0 4px", textAlign: "center" }}>{isGu ? "." : "Monthly EMI"}</p>
           <p style={{ color: "#B8860B", fontSize: 44, fontWeight: 900, margin: "0 0 16px", textAlign: "center", letterSpacing: -1 }}>{fmt(emi)}</p>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
-            {[{ l: isGu ? "." : "Total", v: fmt(total), c: "#2B2115" }, { l: isGu ? "." : "Interest", v: fmt(interest), c: "#EF4444" }, { l: isGu ? "." : "Principal", v: fmt(loanAmt), c: "#0F8F5E" }].map((item, i) => (
+            {            [{ l: isGu ? "." : "Total", v: fmt(total), c: "#2B2115" }, { l: isGu ? "." : "Interest", v: fmt(interest), c: "#EF4444" }, { l: isGu ? "." : "Principal", v: fmt(calculatedLoanAmount), c: "#0F8F5E" }].map((item, i) => (
               <div key={i} style={{ background: "#FFFFFF", borderRadius: 10, padding: "10px 4px", textAlign: "center" }}>
                 <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 9, margin: "0 0 2px" }}>{item.l}</p>
                 <p style={{ color: item.c, fontSize: 11, fontWeight: 800, margin: 0 }}>{item.v}</p>
@@ -1325,7 +1601,7 @@ function EMIPage({ lang, setLang, setPage, setCompareType }) {
 }
 
 // ─── SCHEMES PAGE ─────────────────────────────────────────────────────────────
-function SchemesPage({ lang, setLang }) {
+function SchemesPage({ lang, setLang, schemes }) {
   const [expanded, setExpanded] = useState(null);
   const [activeFilter, setActiveFilter] = useState("all");
   const isGu = lang === "gu";
@@ -1340,7 +1616,7 @@ function SchemesPage({ lang, setLang }) {
     { id: "SC/ST/Women", l: isGu ? "SC/ST" : "SC/ST/Women" },
   ];
 
-  const filtered = activeFilter === "all" ? GOVT_SCHEMES : GOVT_SCHEMES.filter(s => s.tag === activeFilter);
+  const filtered = activeFilter === "all" ? schemes : schemes.filter(s => s.tag === activeFilter);
 
   const handleShare = (scheme) => {
     const text = `${scheme.icon} ${isGu ? scheme.nameGu : scheme.name} — ${isGu ? scheme.oneLinerGu : scheme.oneLiner}\n\nGujaratLoanMitra.com/schemes/${scheme.id}`;
@@ -1356,7 +1632,6 @@ function SchemesPage({ lang, setLang }) {
             <h2 style={{ color: "#2B2115", fontSize: 20, fontWeight: 800, margin: 0 }}>🏛️ {isGu ? "સ." : "Government Schemes"}</h2>
             <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 11, margin: 0 }}>{isGu ? "." : "Know before you borrow — Gujarat's complete guide"}</p>
           </div>
-          <button onClick={() => setLang(isGu ? "en" : "gu")} style={{ background: "rgba(184,134,11,0.12)", border: "1px solid rgba(184,134,11,0.3)", borderRadius: 20, padding: "5px 12px", color: "#B8860B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{isGu ? "EN" : "ગુ"}</button>
         </div>
         <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 12, scrollbarWidth: "none" }}>
           {filters.map(f => (
@@ -1457,6 +1732,43 @@ function SchemesPage({ lang, setLang }) {
 }
 
 // ─── NEWS PAGE ────────────────────────────────────────────────────────────────
+function DsaProfilesPage({ lang, profiles }) {
+  const [selected, setSelected] = useState(null);
+  const isGu = lang === "gu";
+  return (
+    <div className="loan-page" style={S.page}>
+      <div style={S.header}>
+        <h2 style={{ color: "#2B2115", fontSize: 20, fontWeight: 800, margin: 0 }}>🤝 {isGu ? "DSA સલાહકારો" : "DSA Loan Advisors"}</h2>
+        <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 11, margin: "4px 0 0" }}>Connect with verified loan advisors in your area</p>
+      </div>
+      <div style={{ padding: "8px 16px" }}>
+        {profiles.length === 0 && <div style={{ ...S.card, textAlign: "center", color: "rgba(43,33,21,0.55)", fontSize: 12 }}>DSA profiles will appear here when published by the admin.</div>}
+        <div style={{ display: "grid", gap: 12 }}>
+          {profiles.map(profile => (
+            <button key={profile.id} onClick={() => setSelected(profile)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", background: "#fff", border: "1px solid rgba(184,134,11,0.16)", borderRadius: 16, padding: 12, cursor: "pointer" }}>
+              {profile.photo ? <img src={profile.photo} alt={profile.name} style={{ width: 62, height: 62, objectFit: "cover", borderRadius: "50%", border: "2px solid rgba(184,134,11,0.3)" }} /> : <div style={{ width: 62, height: 62, borderRadius: "50%", display: "grid", placeItems: "center", background: "rgba(184,134,11,0.14)", color: "#B8860B", fontSize: 24, fontWeight: 800 }}>{profile.name?.charAt(0) || "D"}</div>}
+              <span style={{ flex: 1 }}><strong style={{ display: "block", color: "#2B2115", fontSize: 14 }}>{profile.name}</strong><span style={{ display: "block", color: "rgba(43,33,21,0.55)", fontSize: 11, marginTop: 3 }}>{profile.designation || "Loan Advisor"}{profile.city ? ` · ${profile.city}` : ""}</span><span style={{ display: "block", color: "#B8860B", fontSize: 10, fontWeight: 700, marginTop: 5 }}>View profile →</span></span>
+            </button>
+          ))}
+        </div>
+      </div>
+      {selected && <div onClick={() => setSelected(null)} style={{ position: "fixed", inset: 0, background: "rgba(20,14,8,0.58)", zIndex: 100, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+        <div onClick={event => event.stopPropagation()} style={{ width: "min(100%, 560px)", maxHeight: "90vh", overflowY: "auto", background: "#FBF8F1", borderRadius: "22px 22px 0 0", padding: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}><strong style={{ color: "#2B2115", fontSize: 16 }}>{selected.name}</strong><button onClick={() => setSelected(null)} style={{ border: "none", background: "rgba(43,33,21,0.08)", borderRadius: 20, width: 30, height: 30, cursor: "pointer" }}>×</button></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+            {[selected.photo, selected.workspacePhoto1, selected.workspacePhoto2].filter(Boolean).map((photo, index) => <img key={`${photo}-${index}`} src={photo} alt={index === 0 ? `${selected.name} profile` : `${selected.name} workspace`} style={{ width: "100%", height: index === 0 ? 220 : 130, objectFit: "cover", borderRadius: 12, gridColumn: index === 0 ? "1 / -1" : "auto" }} />)}
+          </div>
+          <p style={{ color: "rgba(43,33,21,0.7)", fontSize: 12, lineHeight: 1.65, margin: "0 0 12px" }}>{selected.description || "Professional loan assistance for customers."}</p>
+          <div style={{ display: "grid", gap: 7, color: "rgba(43,33,21,0.65)", fontSize: 11 }}>
+            {selected.city && <span>📍 {selected.city}</span>}{selected.experience && <span>⭐ {selected.experience}</span>}{selected.specializations && <span>💼 {selected.specializations}</span>}{selected.languages && <span>🗣️ {selected.languages}</span>}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>{selected.phone && <a href={`tel:${selected.phone}`} style={{ ...S.orange, flex: 1, textAlign: "center", padding: 12, textDecoration: "none", fontSize: 12 }}>Call advisor</a>}{selected.email && <a href={`mailto:${selected.email}`} style={{ flex: 1, textAlign: "center", padding: 12, borderRadius: 10, background: "#fff", border: "1px solid rgba(184,134,11,0.25)", color: "#8B6817", textDecoration: "none", fontSize: 12 }}>Email advisor</a>}</div>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 function NewsPage({ lang, setLang, news }) {
   const [expandedNews, setExpandedNews] = useState(null);
   const [filter, setFilter] = useState("all");
@@ -1484,7 +1796,6 @@ function NewsPage({ lang, setLang, news }) {
             <h2 style={{ color: "#2B2115", fontSize: 20, fontWeight: 800, margin: 0 }}>📰 {isGu ? "." : "News & Alerts"}</h2>
             <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 11, margin: 0 }}>{isGu ? "." : "Gujarat's financial pulse — stay safe, stay smart"}</p>
           </div>
-          <button onClick={() => setLang(isGu ? "en" : "gu")} style={{ background: "rgba(184,134,11,0.12)", border: "1px solid rgba(184,134,11,0.3)", borderRadius: 20, padding: "5px 12px", color: "#B8860B", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{isGu ? "EN" : "ગુ"}</button>
         </div>
         <div style={{ display: "flex", gap: 8, paddingBottom: 12, scrollbarWidth: "none", overflowX: "auto" }}>
           {filters.map(f => (
@@ -1551,6 +1862,8 @@ export default function App() {
   const [showSearch, setShowSearch] = useState(false);
   const [news, setNews] = useState(NEWS);
   const [bankData, setBankData] = useState(BANK_DATA);
+  const [schemes, setSchemes] = useState(GOVT_SCHEMES);
+  const [dsaProfiles, setDsaProfiles] = useState([]);
   const [hasSavedRates, setHasSavedRates] = useState(false);
 
   const tickerItems = useMemo(() => {
@@ -1569,6 +1882,22 @@ export default function App() {
       })
       .then(data => { if (Array.isArray(data.items) && data.items.length > 0) setNews(data.items); })
       .catch(error => console.warn("Live news unavailable; showing verified fallback news.", error));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/schemes")
+      .then(response => {
+        if (!response.ok) throw new Error(`Saved schemes API returned ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (!Array.isArray(data.schemes) || data.schemes.length === 0) return;
+        setSchemes(current => {
+          const savedById = new Map(data.schemes.map(scheme => [scheme.id, scheme]));
+          return [...current.map(scheme => savedById.get(scheme.id) || scheme), ...data.schemes.filter(scheme => !current.some(existing => existing.id === scheme.id))];
+        });
+      })
+      .catch(error => console.warn("Saved schemes unavailable; showing default schemes.", error));
   }, []);
 
   useEffect(() => {
@@ -1592,6 +1921,16 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    fetch("/api/dsas")
+      .then(response => {
+        if (!response.ok) throw new Error(`DSA API returned ${response.status}`);
+        return response.json();
+      })
+      .then(data => { if (Array.isArray(data.profiles)) setDsaProfiles(data.profiles.filter(profile => profile.published !== false)); })
+      .catch(error => console.warn("DSA profiles unavailable; showing an empty directory.", error));
+  }, []);
+
+  useEffect(() => {
     if (hasSavedRates) return;
     console.info("Using default bank rates; live bank scraping is disabled.");
   }, [hasSavedRates]);
@@ -1600,7 +1939,7 @@ export default function App() {
   const isGu = lang === "gu";
 
   if (window.location.pathname === "/admin") {
-    return <AdminPage lang={lang} setLang={setLang} bankData={bankData} setBankData={setBankData} />;
+    return <AdminPage lang={lang} setLang={setLang} bankData={bankData} setBankData={setBankData} schemes={schemes} setSchemes={setSchemes} dsaProfiles={dsaProfiles} setDsaProfiles={setDsaProfiles} />;
   }
 
   return (
@@ -1608,15 +1947,16 @@ export default function App() {
       <DesktopChrome active={page} setPage={setPage} isGu={isGu} setShowSearch={setShowSearch} />
       <DesktopHeader isGu={isGu} setLang={setLang} setShowSearch={setShowSearch} />
       <TickerBar items={tickerItems} />
-      {showSearch && <SearchModal onClose={() => setShowSearch(false)} setPage={setPage} setCompareType={setCompareType} lang={lang} />}
+      {showSearch && <SearchModal onClose={() => setShowSearch(false)} setPage={setPage} setCompareType={setCompareType} lang={lang} profiles={dsaProfiles} />}
       {page === "home" && <HomePage name={userName} lang={lang} setLang={setLang} setPage={setPage} setCompareType={setCompareType} showSearch={showSearch} setShowSearch={setShowSearch} news={news} />}
       {page === "compare" && <ComparePage lang={lang} setLang={setLang} initType={compareType} setPage={setPage} setDetailBank={setDetailBank} bankData={bankData} />}
       {page === "detail" && <DetailPage bank={detailBank} lang={lang} setPage={setPage} />}
       {page === "emi" && <EMIPage lang={lang} setLang={setLang} setPage={setPage} setCompareType={setCompareType} />}
-      {page === "schemes" && <SchemesPage lang={lang} setLang={setLang} />}
+      {page === "schemes" && <SchemesPage lang={lang} setLang={setLang} schemes={schemes} />}
+      {page === "dsas" && <DsaProfilesPage lang={lang} profiles={dsaProfiles} />}
       {page === "news" && <NewsPage lang={lang} setLang={setLang} news={news} />}
       {!noNav && <BottomNav active={page} setPage={setPage} isGu={isGu} />}
-      <style>{`*{box-sizing:border-box}button,input,select{transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease,background .2s ease}button:hover{transform:translateY(-1px)}button:active{transform:translateY(0)}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid rgba(184,134,11,.2);outline-offset:2px}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}::-webkit-scrollbar{display:none}input[type=range]{-webkit-appearance:none;height:6px;border-radius:3px;background:rgba(184,134,11,0.15);outline:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#B8860B;cursor:pointer;box-shadow:0 2px 8px rgba(184,134,11,0.35)}.desktop-sidebar,.desktop-header{display:none}@media(min-width:768px){body{background:#f0ece3}.app-shell{position:relative;max-width:1440px!important;min-height:100vh!important;padding-left:250px;background:radial-gradient(circle at top,#fffdf9 0%,#FBF8F1 48%,#f4efe7 100%)!important;box-shadow:0 0 50px rgba(80,55,10,0.08)}.desktop-sidebar{display:block;position:fixed;left:max(0px,calc((100vw - 1440px)/2));top:0;width:250px;height:100vh;background:linear-gradient(180deg,#221b14 0%,#17120d 100%);color:#fff;padding:30px 18px;z-index:80;border-right:1px solid rgba(212,175,55,.12)}.desktop-header{display:flex;position:sticky;top:0;height:92px;align-items:center;justify-content:space-between;padding:0 42px;background:rgba(251,248,241,.94);border-bottom:1px solid rgba(184,134,11,.12);backdrop-filter:blur(10px);z-index:19}.desktop-header h1{font-size:24px;letter-spacing:-.4px;margin:5px 0 0;color:#2B2115}.desktop-eyebrow{font-size:10px;letter-spacing:1.6px;font-weight:800;color:#B8860B}.desktop-header-actions{display:flex;align-items:center;gap:12px}.desktop-search{width:280px;border:1px solid rgba(184,134,11,.18);border-radius:12px;background:linear-gradient(180deg,#fff 0%,#fffefb 100%);padding:11px 14px;color:rgba(43,33,21,.55);font-size:12px;text-align:left;cursor:pointer;box-shadow:0 8px 18px rgba(184,134,11,.05)}.desktop-search span{font-size:18px;color:#B8860B;margin-right:8px}.desktop-language{border:1px solid rgba(184,134,11,.25);background:#fff;border-radius:10px;padding:10px 13px;color:#8b6817;font-weight:800;cursor:pointer;box-shadow:0 8px 18px rgba(184,134,11,.05)}.desktop-avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#D4AF37;color:#fff;font-weight:800;box-shadow:0 8px 18px rgba(184,134,11,.28)}.desktop-brand{display:flex;align-items:center;gap:11px;padding:0 10px 38px}.desktop-brand strong{display:block;font-size:18px;letter-spacing:-.3px}.desktop-brand span{display:block;color:#D4AF37;font-size:11px;margin-top:2px}.desktop-brand-mark{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#D4AF37,#9C7A1E);display:grid;place-items:center;font-size:22px;font-weight:900;box-shadow:0 10px 20px rgba(184,134,11,.25)}.desktop-menu-label{font-size:9px;letter-spacing:1.5px;color:rgba(255,255,255,.38);font-weight:800;padding:0 13px 10px}.desktop-nav-item{display:flex;align-items:center;width:100%;gap:13px;border:0;background:transparent;color:rgba(255,255,255,.6);padding:13px;border-radius:10px;margin:3px 0;font-size:12px;font-weight:700;text-align:left;cursor:pointer}.desktop-nav-item:hover,.desktop-nav-item.active{background:rgba(212,175,55,.16);color:#fff}.desktop-nav-item.active{box-shadow:inset 3px 0 #D4AF37}.desktop-nav-icon{width:22px;text-align:center;color:#D4AF37;font-size:21px}.desktop-sidebar-card{margin:45px 5px 0;padding:15px 13px;border:1px solid rgba(212,175,55,.22);border-radius:12px;background:linear-gradient(180deg,rgba(212,175,55,.12),rgba(212,175,55,.05));box-shadow:0 10px 22px rgba(212,175,55,.08)}.desktop-sidebar-card-icon{display:block;color:#D4AF37;font-size:18px;margin-bottom:8px}.desktop-sidebar-card strong{font-size:12px}.desktop-sidebar-card p{font-size:10px;line-height:1.5;color:rgba(255,255,255,.5);margin:6px 0 0}.desktop-sidebar-footer{position:absolute;bottom:28px;left:31px;font-size:10px;line-height:1.7;color:rgba(255,255,255,.45)}.desktop-sidebar-footer span{color:#D4AF37}.loan-page{max-width:none!important;padding:18px 42px 104px!important}.loan-page>div{max-width:100%!important}.loan-page [style*="grid-template-columns: repeat(5"]{grid-template-columns:repeat(9,1fr)!important}.loan-page [style*="grid-template-columns: 1fr 1fr 1fr"]{grid-template-columns:repeat(3,1fr)!important}.loan-page [style*="grid-template-columns: 1fr 1fr"]{grid-template-columns:repeat(2,1fr)!important}.loan-page [style*="position: sticky"]{padding-left:0!important;padding-right:0!important}.mobile-nav{display:none!important}.app-shell>div[style*="position: fixed"]{max-width:calc(100% - 250px)!important}.app-shell>div[style*="position: fixed"]>div{max-width:900px!important}.inquiry-bar{padding:16px 42px 20px!important;background:rgba(251,248,241,.96)!important;border-top:1px solid rgba(184,134,11,.16)!important;display:flex;justify-content:flex-end}.inquiry-bar .inquiry-cta{width:min(100%,420px)!important;min-height:54px!important;font-size:14px!important}}`}</style>
+      <style>{`*{box-sizing:border-box}html,body,#app{margin:0;min-height:100%;width:100%}button,input,select{transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease,background .2s ease}button:hover{transform:translateY(-1px)}button:active{transform:translateY(0)}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid rgba(184,134,11,.2);outline-offset:2px}@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}::-webkit-scrollbar{display:none}input[type=range]{-webkit-appearance:none;height:6px;border-radius:3px;background:rgba(184,134,11,0.15);outline:none}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#B8860B;cursor:pointer;box-shadow:0 2px 8px rgba(184,134,11,0.35)}.desktop-sidebar,.desktop-header{display:none}@media(min-width:768px){body{background:#f0ece3}.app-shell{position:relative;width:100%!important;max-width:none!important;margin:0!important;min-height:100vh!important;padding-left:250px;background:radial-gradient(circle at top,#fffdf9 0%,#FBF8F1 48%,#f4efe7 100%)!important;box-shadow:0 0 50px rgba(80,55,10,0.08)}.desktop-sidebar{display:block;position:fixed;left:0;top:0;width:250px;height:100vh;background:linear-gradient(180deg,#221b14 0%,#17120d 100%);color:#fff;padding:30px 18px;z-index:80;border-right:1px solid rgba(212,175,55,.12)}.desktop-header{display:flex;position:sticky;top:0;height:92px;align-items:center;justify-content:space-between;padding:0 42px;background:rgba(251,248,241,.94);border-bottom:1px solid rgba(184,134,11,.12);backdrop-filter:blur(10px);z-index:19}.desktop-header h1{font-size:24px;letter-spacing:-.4px;margin:5px 0 0;color:#2B2115}.desktop-eyebrow{font-size:10px;letter-spacing:1.6px;font-weight:800;color:#B8860B}.desktop-header-actions{display:flex;align-items:center;gap:12px}.desktop-search{width:280px;border:1px solid rgba(184,134,11,.18);border-radius:12px;background:linear-gradient(180deg,#fff 0%,#fffefb 100%);padding:11px 14px;color:rgba(43,33,21,.55);font-size:12px;text-align:left;cursor:pointer;box-shadow:0 8px 18px rgba(184,134,11,.05)}.desktop-search span{font-size:18px;color:#B8860B;margin-right:8px}.desktop-language{border:1px solid rgba(184,134,11,.25);background:#fff;border-radius:10px;padding:10px 13px;color:#8b6817;font-weight:800;cursor:pointer;box-shadow:0 8px 18px rgba(184,134,11,.05)}.desktop-avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#D4AF37;color:#fff;font-weight:800;box-shadow:0 8px 18px rgba(184,134,11,.28)}.desktop-brand{display:flex;align-items:center;gap:11px;padding:0 10px 38px}.desktop-brand strong{display:block;font-size:18px;letter-spacing:-.3px}.desktop-brand span{display:block;color:#D4AF37;font-size:11px;margin-top:2px}.desktop-brand-mark{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#D4AF37,#9C7A1E);display:grid;place-items:center;font-size:22px;font-weight:900;box-shadow:0 10px 20px rgba(184,134,11,.25)}.desktop-menu-label{font-size:9px;letter-spacing:1.5px;color:rgba(255,255,255,.38);font-weight:800;padding:0 13px 10px}.desktop-nav-item{display:flex;align-items:center;width:100%;gap:13px;border:0;background:transparent;color:rgba(255,255,255,.6);padding:13px;border-radius:10px;margin:3px 0;font-size:12px;font-weight:700;text-align:left;cursor:pointer}.desktop-nav-item:hover,.desktop-nav-item.active{background:rgba(212,175,55,.16);color:#fff}.desktop-nav-item.active{box-shadow:inset 3px 0 #D4AF37}.desktop-nav-icon{width:22px;text-align:center;color:#D4AF37;font-size:21px}.desktop-sidebar-card{margin:45px 5px 0;padding:15px 13px;border:1px solid rgba(212,175,55,.22);border-radius:12px;background:linear-gradient(180deg,rgba(212,175,55,.12),rgba(212,175,55,.05));box-shadow:0 10px 22px rgba(212,175,55,.08)}.desktop-sidebar-card-icon{display:block;color:#D4AF37;font-size:18px;margin-bottom:8px}.desktop-sidebar-card strong{font-size:12px}.desktop-sidebar-card p{font-size:10px;line-height:1.5;color:rgba(255,255,255,.5);margin:6px 0 0}.desktop-sidebar-footer{position:absolute;bottom:28px;left:31px;font-size:10px;line-height:1.7;color:rgba(255,255,255,.45)}.desktop-sidebar-footer span{color:#D4AF37}.loan-page{max-width:none!important;padding:18px 42px 104px!important}.loan-page>div{max-width:100%!important}.loan-page [style*="grid-template-columns: repeat(5"]{grid-template-columns:repeat(9,1fr)!important}.loan-page [style*="grid-template-columns: 1fr 1fr 1fr"]{grid-template-columns:repeat(3,1fr)!important}.loan-page [style*="grid-template-columns: 1fr 1fr"]{grid-template-columns:repeat(2,1fr)!important}.loan-page [style*="position: sticky"]{padding-left:0!important;padding-right:0!important}.mobile-nav{display:none!important}.app-shell>div[style*="position: fixed"]{max-width:calc(100% - 250px)!important}.app-shell>div[style*="position: fixed"]>div{max-width:900px!important}.inquiry-bar{padding:16px 42px 20px!important;background:rgba(251,248,241,.96)!important;border-top:1px solid rgba(184,134,11,.16)!important;display:flex;justify-content:flex-end}.inquiry-bar .inquiry-cta{width:min(100%,420px)!important;min-height:54px!important;font-size:14px!important}}`}</style>
     </div>
   );
 }
