@@ -209,7 +209,7 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
 
   useEffect(() => {
     setBankId(bankData[loanType]?.[0]?.id);
-  }, [loanType, bankData]);
+  }, [loanType]);
 
   const updateSelected = (field, value) => {
     if (!selected) return;
