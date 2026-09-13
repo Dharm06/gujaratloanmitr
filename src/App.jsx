@@ -114,7 +114,7 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
   const [newNbfc, setNewNbfc] = useState({ name: "", short: "", loanType: "home", rate: "10", maxRate: "12", fee: "2", approval: "70", maxLoan: "1000000", tenure: "1-5 yrs", city: "" });
   const isGu = lang === "gu";
   const banks = bankData[loanType] || [];
-  const selected = banks.find(bank => bank.id === Number(bankId)) || banks[0];
+  const selected = banks.find(bank => String(bank.id) === String(bankId)) || banks[0];
 
   const login = async (event) => {
     event.preventDefault();
@@ -221,7 +221,7 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
 
   const saveRates = async () => {
     setSaveStatus("Saving...");
-    const rates = Object.entries(bankData).flatMap(([loanType, banks]) => banks.map(bank => ({
+    const rates = Object.entries(bankData).flatMap(([loanType, banks]) => banks.filter(bank => Number.isInteger(bank.id)).map(bank => ({
       loanType,
       bankId: bank.id,
       rate: bank.rate,
