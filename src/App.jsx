@@ -1476,7 +1476,7 @@ function DetailPage({ bank, lang, setPage }) {
                     `Tenure: ${inquiry.tenure} years`,
                     `Rate viewed: ${bank?.rate || rate}%`,
                   ].join("\n");
-                  window.location.href = `https://wa.me/917202046658?text=${encodeURIComponent(message)}`;
+                  window.location.href = `https://wa.me/916353847907?text=${encodeURIComponent(message)}`;
                 }} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {[["name", "Full name", "text"], ["phone", "Mobile number", "tel"], ["city", "City / District", "text"]].map(([key, label, type]) => (
                     <input key={key} required type={type} value={inquiry[key]} onChange={e => setInquiry(v => ({ ...v, [key]: e.target.value }))} placeholder={label} style={{ width: "100%", padding: "12px 13px", border: "1px solid rgba(184,134,11,0.2)", borderRadius: 10, fontSize: 13, outline: "none", color: "#2B2115" }} />
