@@ -444,6 +444,61 @@ async function supabaseNbfcsMiddleware(req, res, env) {
   return true;
 }
 
+async function supabaseDsaLeadsMiddleware(req, res, env) {
+  if (!req.url.startsWith("/api/dsa-leads")) return false;
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceRole = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRole) {
+    res.statusCode = 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Supabase is not configured" }));
+    return true;
+  }
+  const headers = { apikey: serviceRole, Authorization: `Bearer ${serviceRole}`, "Content-Type": "application/json" };
+  if (req.method === "GET") {
+    const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    if (!isValidToken(token, env.ADMIN_PASSWORD)) {
+      res.statusCode = 401;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Admin authentication required" }));
+      return true;
+    }
+    const response = await fetch(`${supabaseUrl}/rest/v1/dsa_call_leads?select=id,payload,created_at&order=created_at.desc`, { headers });
+    const data = await response.json().catch(() => []);
+    res.statusCode = response.ok ? 200 : 500;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ leads: Array.isArray(data) ? data.map(row => ({ ...row.payload, id: row.id, createdAt: row.created_at })) : [] }));
+    return true;
+  }
+  if (req.method !== "POST") {
+    res.statusCode = 405;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ error: "Method not allowed" }));
+    return true;
+  }
+  let body = "";
+  req.setEncoding("utf8");
+  req.on("data", chunk => { body += chunk; });
+  req.on("end", async () => {
+    try {
+      const lead = JSON.parse(body || "{}").lead;
+      if (!lead || !lead.name?.trim() || !lead.phone?.trim() || !lead.city?.trim()) throw new Error("Name, mobile number, and city are required");
+      const payload = { name: lead.name.trim().slice(0, 120), phone: lead.phone.trim().slice(0, 30), city: lead.city.trim().slice(0, 120), targetId: String(lead.targetId || "").slice(0, 120), targetName: String(lead.targetName || "DSA advisor").slice(0, 120) };
+      const row = { id: crypto.randomUUID(), payload, created_at: new Date().toISOString() };
+      const response = await fetch(`${supabaseUrl}/rest/v1/dsa_call_leads`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(row) });
+      const text = await response.text();
+      res.statusCode = response.ok ? 201 : 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(response.ok ? { saved: true } : { error: text || "Failed to save lead" }));
+    } catch (error) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: error.message }));
+    }
+  });
+  return true;
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
@@ -475,6 +530,12 @@ export default defineConfig(({ mode }) => {
           }
           if (req.url.startsWith("/api/nbfcs")) {
             supabaseNbfcsMiddleware(req, res, env).then((handled) => {
+              if (!handled) next();
+            });
+            return;
+          }
+          if (req.url.startsWith("/api/dsa-leads")) {
+            supabaseDsaLeadsMiddleware(req, res, env).then((handled) => {
               if (!handled) next();
             });
             return;

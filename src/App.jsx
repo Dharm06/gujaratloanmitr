@@ -111,6 +111,7 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
   const [dsaId, setDsaId] = useState(dsaProfiles[0]?.id || "");
   const [dsaStatus, setDsaStatus] = useState("");
   const [nbfcStatus, setNbfcStatus] = useState("");
+  const [dsaLeads, setDsaLeads] = useState([]);
   const [newNbfc, setNewNbfc] = useState({ name: "", short: "", loanType: "home", rate: "10", maxRate: "12", fee: "2", approval: "70", maxLoan: "1000000", tenure: "1-5 yrs", city: "" });
   const isGu = lang === "gu";
   const banks = bankData[loanType] || [];
@@ -152,6 +153,16 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
         }));
       })
       .catch(error => console.warn("Saved rates unavailable; showing default rates.", error));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/dsa-leads", { headers: { Authorization: `Bearer ${sessionStorage.getItem("adminToken")}` } })
+      .then(response => {
+        if (!response.ok) throw new Error(`DSA leads API returned ${response.status}`);
+        return response.json();
+      })
+      .then(data => { if (Array.isArray(data.leads)) setDsaLeads(data.leads); })
+      .catch(error => console.warn("DSA leads unavailable.", error));
   }, []);
 
   useEffect(() => {
@@ -458,6 +469,11 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
           </form>
           {nbfcs.length > 0 && <div style={{ display: "grid", gap: 7, marginTop: 14 }}>{nbfcs.map(nbfc => <div key={nbfc.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "#fff", borderRadius: 9, border: "1px solid rgba(184,134,11,0.12)" }}><span style={{ flex: 1, color: "#2B2115", fontSize: 11, fontWeight: 700 }}>{nbfc.name}<small style={{ display: "block", color: "rgba(43,33,21,0.45)", fontWeight: 400 }}>{LOAN_META[nbfc.loanType]?.label}</small></span><button type="button" onClick={() => removeNbfc(nbfc)} style={{ border: "1px solid rgba(220,38,38,0.25)", background: "#fff", color: "#B42318", borderRadius: 7, padding: "5px 8px", fontSize: 10, cursor: "pointer" }}>Remove</button></div>)}</div>}
           {nbfcStatus && <p style={{ color: nbfcStatus === "Saving..." || nbfcStatus === "Removing..." ? "#B8860B" : "#16803c", fontSize: 11, textAlign: "center", margin: "10px 0 0" }}>{nbfcStatus}</p>}
+        </div>
+        <div style={{ ...S.card, marginTop: 22 }}>
+          <h3 style={{ color: "#2B2115", fontSize: 15, margin: "0 0 5px" }}>DSA call requests ({dsaLeads.length})</h3>
+          <p style={{ color: "rgba(43,33,21,0.55)", fontSize: 11, margin: "0 0 12px" }}>Details submitted before users call a DSA advisor.</p>
+          {dsaLeads.length === 0 ? <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 11 }}>No DSA call requests yet.</p> : <div style={{ display: "grid", gap: 8 }}>{dsaLeads.map(lead => <div key={lead.id} style={{ background: "#fff", border: "1px solid rgba(184,134,11,0.12)", borderRadius: 10, padding: 10 }}><strong style={{ color: "#2B2115", fontSize: 12 }}>{lead.name}</strong><p style={{ color: "rgba(43,33,21,0.65)", fontSize: 11, margin: "4px 0" }}>📞 {lead.phone} · 📍 {lead.city}</p><p style={{ color: "#B8860B", fontSize: 10, margin: 0 }}>Requested for {lead.targetName} · {lead.createdAt ? new Date(lead.createdAt).toLocaleString("en-IN") : ""}</p></div>)}</div>}
         </div>
       </div>
     </div>
@@ -1447,9 +1463,11 @@ function DetailPage({ bank, lang, setPage }) {
 
       {/* Apply button */}
       <div className="inquiry-bar" style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "rgba(255,255,255,0.97)", backdropFilter: "blur(20px)", borderTop: "1px solid rgba(184,134,11,0.15)", padding: "14px 16px 24px", boxShadow: "0 -4px 20px rgba(0,0,0,0.04)" }}>
-        <button className="inquiry-cta" onClick={() => { setInquiry(v => ({ ...v, amount: String(loanAmt), tenure: String(tenure) })); setShowApply(true); }} style={{ width: "100%", padding: "15px", ...S.orange, fontSize: 15 }}>
-          <span className="inquiry-cta-icon">💬</span>{isGu ? "." : "Send Loan Inquiry on WhatsApp"}<span className="inquiry-cta-arrow">→</span>
-        </button>
+        <div style={{ width: "100%" }}>
+          <button className="inquiry-cta" onClick={() => { setInquiry(v => ({ ...v, amount: String(loanAmt), tenure: String(tenure) })); setShowApply(true); }} style={{ width: "100%", padding: "15px", ...S.orange, fontSize: 15 }}>
+            <span className="inquiry-cta-icon">💬</span>{isGu ? "." : "Send inquiry"}<span className="inquiry-cta-arrow">→</span>
+          </button>
+        </div>
       </div>
 
       {/* Apply modal */}
@@ -1808,8 +1826,43 @@ function SchemesPage({ lang, setLang, schemes }) {
 }
 
 // ─── NEWS PAGE ────────────────────────────────────────────────────────────────
+function CallGateModal({ targetId, targetName, targetPhone, onClose }) {
+  const [form, setForm] = useState({ name: "", phone: "", city: "" });
+  const [submitted, setSubmitted] = useState(false);
+  const submit = event => {
+    event.preventDefault();
+    fetch("/api/dsa-leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lead: { ...form, targetId, targetName } }),
+    }).then(response => {
+      if (!response.ok) throw new Error("Unable to save call request");
+      setSubmitted(true);
+      window.location.href = `tel:${String(targetPhone).replace(/[^\d+]/g, "")}`;
+    }).catch(() => {});
+  };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(20,15,5,0.6)", zIndex: 210, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div onClick={event => event.stopPropagation()} style={{ width: "100%", maxWidth: 430, background: "#fff", borderRadius: "24px 24px 0 0", padding: "24px 20px 34px" }}>
+        {!submitted ? <>
+          <h2 style={{ color: "#2B2115", fontSize: 19, margin: "0 0 6px" }}>Before you call {targetName}</h2>
+          <p style={{ color: "rgba(43,33,21,0.6)", fontSize: 12, lineHeight: 1.5, margin: "0 0 16px" }}>Please share your details so the advisor can understand your requirement and respond appropriately.</p>
+          <form onSubmit={submit} style={{ display: "grid", gap: 10 }}>
+            <input required placeholder="Full name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={{ padding: 12, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 10 }} />
+            <input required type="tel" placeholder="Mobile number" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={{ padding: 12, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 10 }} />
+            <input required placeholder="City / District" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} style={{ padding: 12, border: "1px solid rgba(184,134,11,0.2)", borderRadius: 10 }} />
+            <button type="submit" style={{ ...S.orange, padding: 14, fontSize: 14 }}>Submit & call now</button>
+          </form>
+          <button onClick={onClose} style={{ width: "100%", marginTop: 8, padding: 12, background: "#fff", border: "1px solid rgba(184,134,11,0.15)", borderRadius: 10, color: "rgba(43,33,21,0.5)", cursor: "pointer" }}>Cancel</button>
+        </> : <p style={{ color: "#0F8F5E", fontWeight: 700, textAlign: "center" }}>Opening your phone app…</p>}
+      </div>
+    </div>
+  );
+}
+
 function DsaProfilesPage({ lang, profiles }) {
   const [selected, setSelected] = useState(null);
+  const [callTarget, setCallTarget] = useState(null);
   const isGu = lang === "gu";
   return (
     <div className="loan-page" style={S.page}>
@@ -1838,9 +1891,10 @@ function DsaProfilesPage({ lang, profiles }) {
           <div style={{ display: "grid", gap: 7, color: "rgba(43,33,21,0.65)", fontSize: 11 }}>
             {selected.city && <span>📍 {selected.city}</span>}{selected.experience && <span>⭐ {selected.experience}</span>}{selected.specializations && <span>💼 {selected.specializations}</span>}{selected.languages && <span>🗣️ {selected.languages}</span>}
           </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>{selected.phone && <a href={`tel:${selected.phone}`} style={{ ...S.orange, flex: 1, textAlign: "center", padding: 12, textDecoration: "none", fontSize: 12 }}>Call advisor</a>}{selected.email && <a href={`mailto:${selected.email}`} style={{ flex: 1, textAlign: "center", padding: 12, borderRadius: 10, background: "#fff", border: "1px solid rgba(184,134,11,0.25)", color: "#8B6817", textDecoration: "none", fontSize: 12 }}>Email advisor</a>}</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>{selected.phone && <button onClick={() => setCallTarget(selected)} style={{ ...S.orange, flex: 1, padding: 12, fontSize: 12 }}>Call advisor</button>}{selected.email && <a href={`mailto:${selected.email}`} style={{ flex: 1, textAlign: "center", padding: 12, borderRadius: 10, background: "#fff", border: "1px solid rgba(184,134,11,0.25)", color: "#8B6817", textDecoration: "none", fontSize: 12 }}>Email advisor</a>}</div>
         </div>
       </div>}
+      {callTarget && <CallGateModal targetId={callTarget.id} targetName={callTarget.name} targetPhone={callTarget.phone} onClose={() => setCallTarget(null)} />}
     </div>
   );
 }
@@ -1990,7 +2044,7 @@ export default function App() {
           ...current,
           ...Object.fromEntries(Object.entries(current).map(([loanType, banks]) => [loanType, banks.map(bank => {
             const saved = data.rates.find(rate => rate.loan_type === loanType && rate.bank_id === bank.id);
-            return saved ? { ...bank, rate: Number(saved.rate), maxRate: Number(saved.max_rate), fee: Number(saved.fee) } : bank;
+            return saved ? { ...bank, rate: Number(saved.rate), maxRate: Number(saved.max_rate), fee: Number(saved.fee), phone: saved.contact_phone || bank.phone || "" } : bank;
           })])),
         }));
       })

@@ -4,6 +4,7 @@ create table if not exists public.loan_rates (
   rate numeric(6, 2) not null,
   max_rate numeric(6, 2) not null,
   fee numeric(6, 2) not null,
+  contact_phone text,
   updated_at timestamptz not null default now(),
   primary key (loan_type, bank_id)
 );
@@ -33,3 +34,11 @@ create table if not exists public.custom_nbfcs (
 );
 
 alter table public.custom_nbfcs enable row level security;
+
+create table if not exists public.dsa_call_leads (
+  id text primary key,
+  payload jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+alter table public.dsa_call_leads enable row level security;
