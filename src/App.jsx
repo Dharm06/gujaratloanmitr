@@ -54,7 +54,7 @@ function BottomNav({ active, setPage, isGu }) {
     { id: "compare", icon: "🔍", label: isGu ? "સરખાવો" : "Compare" },
     { id: "emi", icon: "🧮", label: "EMI" },
     { id: "schemes", icon: "🏛️", label: isGu ? "યોજના" : "Schemes" },
-    { id: "dsas", icon: "🤝", label: isGu ? "DSA" : "DSA Profiles" },
+    { id: "dsas", icon: "🤝", label: isGu ? "DSA" : "Bankers" },
     { id: "news", icon: "📰", label: isGu ? "સમાચાર" : "News" },
   ];
   return (
@@ -76,7 +76,7 @@ function DesktopChrome({ active, setPage, isGu, setShowSearch }) {
     { id: "compare", icon: "⌕", label: isGu ? "સરખાવો" : "Compare Loans" },
     { id: "emi", icon: "∑", label: "EMI Calculator" },
     { id: "schemes", icon: "▣", label: isGu ? "યોજના" : "Government Schemes" },
-    { id: "dsas", icon: "♙", label: isGu ? "DSA" : "DSA Profiles" },
+    { id: "dsas", icon: "♙", label: isGu ? "DSA" : "Bankers" },
     { id: "news", icon: "◈", label: isGu ? "સમાચાર" : "News & Alerts" },
   ];
   return (
@@ -433,7 +433,7 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
         </div>
         <div style={{ ...S.card, marginTop: 22 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <h3 style={{ color: "#2B2115", fontSize: 15, margin: 0 }}>DSA profiles</h3>
+            <h3 style={{ color: "#2B2115", fontSize: 15, margin: 0 }}>Bankers</h3>
             <button onClick={addDsa} style={{ ...S.orange, padding: "8px 10px", fontSize: 11 }}>+ Add DSA</button>
           </div>
           <p style={{ color: "rgba(43,33,21,0.55)", fontSize: 11, lineHeight: 1.5, margin: "0 0 12px" }}>Add image URLs for the profile photo and two workspace photos. Only published profiles appear publicly.</p>
@@ -452,7 +452,7 @@ function AdminPage({ lang, setLang, bankData, setBankData, schemes, setSchemes, 
               <input type="checkbox" checked={selectedDsa.published !== false} onChange={event => updateDsa("published", event.target.checked)} /> Publish this profile
             </label>
           </div>}
-          <button onClick={saveDsas} style={{ width: "100%", padding: 13, marginTop: 14, ...S.orange, fontSize: 13 }}>Publish DSA profiles</button>
+          <button onClick={saveDsas} style={{ width: "100%", padding: 13, marginTop: 14, ...S.orange, fontSize: 13 }}>Publish bankers</button>
           {selectedDsa && <button onClick={removeDsa} style={{ width: "100%", padding: 12, marginTop: 8, background: "#fff", border: "1px solid rgba(220,38,38,0.3)", borderRadius: 12, color: "#B42318", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Remove selected DSA</button>}
           {dsaStatus && <p style={{ color: dsaStatus === "Saving..." ? "#B8860B" : "#16803c", fontSize: 11, textAlign: "center", margin: "10px 0 0" }}>{dsaStatus}</p>}
         </div>
@@ -1867,11 +1867,11 @@ function DsaProfilesPage({ lang, profiles }) {
   return (
     <div className="loan-page" style={S.page}>
       <div style={S.header}>
-        <h2 style={{ color: "#2B2115", fontSize: 20, fontWeight: 800, margin: 0 }}>🤝 {isGu ? "DSA સલાહકારો" : "DSA Loan Advisors"}</h2>
+        <h2 style={{ color: "#2B2115", fontSize: 20, fontWeight: 800, margin: 0 }}>🤝 {isGu ? "DSA સલાહકારો" : "Bankers"}</h2>
         <p style={{ color: "rgba(43,33,21,0.45)", fontSize: 11, margin: "4px 0 0" }}>Connect with verified loan advisors in your area</p>
       </div>
       <div style={{ padding: "8px 16px" }}>
-        {profiles.length === 0 && <div style={{ ...S.card, textAlign: "center", color: "rgba(43,33,21,0.55)", fontSize: 12 }}>DSA profiles will appear here when published by the admin.</div>}
+        {profiles.length === 0 && <div style={{ ...S.card, textAlign: "center", color: "rgba(43,33,21,0.55)", fontSize: 12 }}>Bankers will appear here when published by the admin.</div>}
         <div style={{ display: "grid", gap: 12 }}>
           {profiles.map(profile => (
             <button key={profile.id} onClick={() => setSelected(profile)} style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left", background: "#fff", border: "1px solid rgba(184,134,11,0.16)", borderRadius: 16, padding: 12, cursor: "pointer" }}>
